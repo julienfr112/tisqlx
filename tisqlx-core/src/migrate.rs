@@ -316,17 +316,17 @@ impl Migrator {
 
     /// Apply every pending migration on `conn`.
     pub async fn run_on(&self, conn: &mut TiConnection) -> Result<(), MigrateError> {
-        self.with_lock(conn, |this, conn, table| Box::pin(this.run_locked(conn, table, None))).await
+        self.with_lock(conn, |this, conn, db| Box::pin(this.run_locked(conn, db, None))).await
     }
 
     /// Apply pending migrations up to and including `target` version.
     pub async fn run_to(&self, conn: &mut TiConnection, target: i64) -> Result<(), MigrateError> {
-        self.with_lock(conn, move |this, conn, table| Box::pin(this.run_locked(conn, table, Some(target)))).await
+        self.with_lock(conn, move |this, conn, db| Box::pin(this.run_locked(conn, db, Some(target)))).await
     }
 
     /// Revert applied reversible migrations newer than `target` (or only the latest one if `None`).
     pub async fn undo(&self, conn: &mut TiConnection, target: Option<i64>) -> Result<(), MigrateError> {
-        self.with_lock(conn, move |this, conn, table| Box::pin(this.undo_locked(conn, table, target))).await
+        self.with_lock(conn, move |this, conn, db| Box::pin(this.undo_locked(conn, db, target))).await
     }
 
     /// Clear the dirty flag of `version` after fixing the database by hand,
@@ -334,16 +334,17 @@ impl Migrator {
     /// removing its record (`false`, only for a dirty migration).
     pub async fn repair(&self, conn: &mut TiConnection, version: i64, applied: bool) -> Result<(), MigrateError> {
         // Under the lock: a migration that is still running also looks dirty.
-        self.with_lock(conn, move |this, conn, table| Box::pin(this.repair_locked(conn, table, version, applied))).await
+        self.with_lock(conn, move |this, conn, db| Box::pin(this.repair_locked(conn, db, version, applied))).await
     }
 
     async fn repair_locked(
         &self,
         conn: &mut TiConnection,
-        table: String,
+        db: String,
         version: i64,
         applied: bool,
     ) -> Result<(), MigrateError> {
+        let table = self.qualified_table(&db);
         if !applied && self.applied(conn).await?.iter().any(|a| a.version == version && a.success) {
             return Err(MigrateError::NotDirty(version));
         }
@@ -391,9 +392,7 @@ impl Migrator {
             .collect())
     }
 
-    /// Run `f` holding the migration lock. `f` gets the migrations table name qualified
-    /// with the current database, so migration SQL that runs `USE other` cannot redirect
-    /// the bookkeeping.
+    /// Run `f` holding the migration lock. `f` gets the current database, quoted.
     async fn with_lock<'a, F>(&'a self, conn: &'a mut TiConnection, f: F) -> Result<(), MigrateError>
     where
         F: for<'c> FnOnce(
@@ -422,8 +421,7 @@ impl Migrator {
             conn.user_locks = false;
             return Err(MigrateError::LockTimeout(self.lock_timeout));
         }
-        let table = format!("{}.{}", quote_ident(&db), self.table());
-        let result = f(self, &mut *conn, table).await;
+        let result = f(self, &mut *conn, quote_ident(&db)).await;
         let released = query("SELECT RELEASE_LOCK(?)").bind(&lock_name).execute(&mut *conn).await;
         if released.is_ok() {
             conn.user_locks = false;
@@ -455,25 +453,33 @@ impl Migrator {
         Ok(())
     }
 
-    /// A migration must not leave a transaction open: the bookkeeping that follows would
-    /// join it (and be rolled back with it). Roll it back and fail, leaving the migration dirty.
-    async fn no_open_transaction(&self, conn: &mut TiConnection, version: i64) -> Result<(), MigrateError> {
+    /// The migrations table qualified with `db`, so that migration SQL running
+    /// `USE other` cannot redirect the bookkeeping.
+    fn qualified_table(&self, db: &str) -> String {
+        format!("{db}.{}", self.table())
+    }
+
+    /// Run the SQL of `m`, then undo what it may have done to the session.
+    async fn execute(&self, conn: &mut TiConnection, db: &str, m: &Migration) -> Result<(), MigrateError> {
+        let ran = conn.execute_raw(&m.sql).await;
+        // After a `USE other`, later migrations and the caller still expect the original database.
+        let restored = conn.execute_raw(&format!("USE {db}")).await;
+        ran.map_err(|e| MigrateError::ExecuteMigration(m.version, e))?;
+        restored?;
+        // The bookkeeping that follows would join an open transaction (and be rolled back
+        // with it): roll it back and fail, leaving the migration dirty.
         if conn.in_transaction() {
             conn.execute_raw("ROLLBACK").await?;
             return Err(MigrateError::ExecuteMigration(
-                version,
+                m.version,
                 Error::config("the migration left a transaction open (missing COMMIT); it was rolled back"),
             ));
         }
         Ok(())
     }
 
-    async fn run_locked(
-        &self,
-        conn: &mut TiConnection,
-        table: String,
-        target: Option<i64>,
-    ) -> Result<(), MigrateError> {
+    async fn run_locked(&self, conn: &mut TiConnection, db: String, target: Option<i64>) -> Result<(), MigrateError> {
+        let table = self.qualified_table(&db);
         self.ensure_table(conn).await?;
         let applied = self.applied(conn).await?;
         for m in self.pending(&applied, target)? {
@@ -487,8 +493,7 @@ impl Migrator {
             .execute(&mut *conn)
             .await?;
             let start = Instant::now();
-            conn.execute_raw(&m.sql).await.map_err(|e| MigrateError::ExecuteMigration(m.version, e))?;
-            self.no_open_transaction(conn, m.version).await?;
+            self.execute(conn, &db, m).await?;
             let elapsed = start.elapsed().as_nanos() as i64;
             let done = query(format!("UPDATE {table} SET success = TRUE, execution_time = ? WHERE version = ?"))
                 .bind(elapsed)
@@ -503,12 +508,8 @@ impl Migrator {
         Ok(())
     }
 
-    async fn undo_locked(
-        &self,
-        conn: &mut TiConnection,
-        table: String,
-        target: Option<i64>,
-    ) -> Result<(), MigrateError> {
+    async fn undo_locked(&self, conn: &mut TiConnection, db: String, target: Option<i64>) -> Result<(), MigrateError> {
+        let table = self.qualified_table(&db);
         let applied = self.applied(conn).await?;
         for down in self.to_revert(&applied, target)? {
             let version = down.version;
@@ -517,8 +518,7 @@ impl Migrator {
                 .bind(version)
                 .execute(&mut *conn)
                 .await?;
-            conn.execute_raw(&down.sql).await.map_err(|e| MigrateError::ExecuteMigration(version, e))?;
-            self.no_open_transaction(conn, version).await?;
+            self.execute(conn, &db, down).await?;
             query(format!("DELETE FROM {table} WHERE version = ?")).bind(version).execute(&mut *conn).await?;
         }
         Ok(())

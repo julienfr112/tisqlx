@@ -151,16 +151,29 @@ async fn migration_sql_cannot_break_the_bookkeeping() {
     let opts = fresh_db("mig5").await;
     fresh_db("mig5_other").await;
     let mut conn = opts.connect().await.unwrap();
-    // `USE` inside a migration: the bookkeeping still goes to the original database
-    let d = dir("mig5", &[("1_use.sql", "USE tisqlx_t_mig5_other; CREATE TABLE elsewhere (id INT PRIMARY KEY);")]);
+    // `USE` inside a migration redirects neither the bookkeeping nor the next migration
+    let d = dir(
+        "mig5",
+        &[
+            ("1_use.sql", "USE tisqlx_t_mig5_other; CREATE TABLE elsewhere (id INT PRIMARY KEY);"),
+            ("2_table.sql", "CREATE TABLE t2 (id INT PRIMARY KEY);"),
+        ],
+    );
     Migrator::new(&d).unwrap().run_on(&mut conn).await.unwrap();
-    conn.execute_raw("USE tisqlx_t_mig5").await.unwrap();
+    let db: String = query_scalar("SELECT DATABASE()").fetch_one(&mut conn).await.unwrap();
+    assert_eq!(db, "tisqlx_t_mig5", "the connection is back on its database");
+    let t2: i64 = query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 't2'",
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(t2, 1, "migration 2 ran in the original database");
     let applied = Migrator::new(&d).unwrap().applied(&mut conn).await.unwrap();
-    assert!(applied[0].success);
+    assert!(applied.iter().all(|a| a.success) && applied.len() == 2);
 
     // a migration that leaves a transaction open fails and stays dirty
     // (DDL commits implicitly in TiDB, so the open transaction holds only DML)
-    std::fs::write(d.join("2_table.sql"), "CREATE TABLE t2 (id INT PRIMARY KEY);").unwrap();
     std::fs::write(d.join("3_open.sql"), "BEGIN; INSERT INTO t2 VALUES (1);").unwrap();
     let err = Migrator::new(&d).unwrap().run_on(&mut conn).await.unwrap_err();
     assert!(matches!(&err, MigrateError::ExecuteMigration(3, _)) && err.to_string().contains("COMMIT"), "{err}");
