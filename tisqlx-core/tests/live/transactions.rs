@@ -241,3 +241,39 @@ async fn acquire_accepts_pools_connections_and_transactions() {
     assert_eq!(count_users(&pool).await, 3);
     assert_eq!(count_users(&mut conn).await, 3);
 }
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn nested_levels_whatever_the_kind_of_transaction() {
+    // Nested levels check the server's "in transaction" flag before touching their savepoint:
+    // it must be set in every kind of read-write transaction, and stay set after an error.
+    require_db!();
+    let opts = fresh_db("txstatus").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw("CREATE TABLE t (id INT PRIMARY KEY)").await.unwrap();
+
+    let mut id = 0;
+    for (setup, options) in [
+        ("SET autocommit = 1", TxnOptions::optimistic()),
+        ("SET autocommit = 1", TxnOptions::pessimistic()),
+        ("SET autocommit = 0", TxnOptions::default()),
+    ] {
+        conn.execute_raw(setup).await.unwrap();
+        let mut tx = conn.begin_with(&options).await.unwrap();
+        // before any statement in the transaction
+        tx.begin().await.unwrap().commit().await.unwrap();
+        tx.begin().await.unwrap().rollback().await.unwrap();
+        id += 1;
+        let mut nested = tx.begin().await.unwrap();
+        query("INSERT INTO t VALUES (?)").bind(id).execute(&mut *nested).await.unwrap();
+        // a failed statement does not end the transaction
+        query("SELECT * FROM missing").execute(&mut *nested).await.unwrap_err();
+        nested.commit().await.unwrap();
+        let mut nested = tx.begin().await.unwrap();
+        query("INSERT INTO t VALUES (?)").bind(id + 100).execute(&mut *nested).await.unwrap();
+        query("SELECT * FROM missing").execute(&mut *nested).await.unwrap_err();
+        nested.rollback().await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(count(&mut conn).await, i64::from(id), "{setup}, {options:?}");
+    }
+}
