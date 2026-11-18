@@ -6,6 +6,7 @@
 #   make db-cluster     start the cluster tier (tiup playground: 2 TiDB, PD, TiKV, TiFlash)
 #   make test-cluster   tests that need the real cluster
 #   make bench          throughput against the test DB (10 connections, 10 s per workload)
+#   make bench-cluster  the same on a production-shaped playground (1 TiDB, 3 TiKV), started and stopped
 #
 # Tests never use a shared server: TISQLX_TEST_URL points at the dedicated instance.
 
@@ -20,7 +21,7 @@ CLI         := cargo run -q -p tisqlx-cli --
 LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET=$(TEST_SOCKET) TISQLX_TEST_REQUIRE=1 \
 	DATABASE_URL=$(MACROS_URL) TISQLX_OFFLINE=false
 
-.PHONY: help bench db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
+.PHONY: help bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
 
 help:
 	@sed -n 's/^#   \(make .*\)/\1/p' Makefile
@@ -89,6 +90,14 @@ msrv:
 BENCH_ARGS ?=
 bench:
 	cargo run -q --release -p tisqlx-core --example bench -- --url $(TEST_URL) $(BENCH_ARGS)
+
+# Not the default benchmark: a production-shaped cluster (3 TiKV, so every write is replicated
+# 3 times; 1 TiDB; no TiFlash) at port offset 20000, started for the run and stopped after.
+BENCH_CLUSTER := CLUSTER_PORT_OFFSET=20000 CLUSTER_DB=1 CLUSTER_KV=3 CLUSTER_TIFLASH=0
+bench-cluster:
+	$(BENCH_CLUSTER) scripts/tidb.sh cluster-up
+	cargo run -q --release -p tisqlx-core --example bench -- --url $$($(BENCH_CLUSTER) scripts/tidb.sh cluster-url) $(BENCH_ARGS); \
+		status=$$?; $(BENCH_CLUSTER) scripts/tidb.sh cluster-down; exit $$status
 
 audit:
 	cargo audit

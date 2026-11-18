@@ -3,7 +3,7 @@
 # on its own port, with TLS and a Unix socket. Never point tests at a shared server.
 #
 #   scripts/tidb.sh up | down | status | url
-#   scripts/tidb.sh cluster-up | cluster-down | cluster-urls
+#   scripts/tidb.sh cluster-up | cluster-down | cluster-urls | cluster-url
 #
 # Uses the tidb-server binary from tiup (`tiup install tidb:$TIDB_VERSION`), or
 # docker (`TIDB_RUNNER=docker`) with the pingcap/tidb image of the same version.
@@ -11,6 +11,8 @@
 # `cluster-up` starts a real cluster for the cluster test tier with `tiup playground`:
 # 2 TiDB, 1 PD, 1 TiKV, 1 TiFlash, every port shifted by $CLUSTER_PORT_OFFSET (10000)
 # so it can run next to a default playground. It takes ~30 s and a few GB of RAM.
+# CLUSTER_DB, CLUSTER_KV and CLUSTER_TIFLASH change the topology: `make bench-cluster`
+# uses 1 TiDB and 3 TiKV (3 replicas, as in production), no TiFlash, at offset 20000.
 set -euo pipefail
 
 TIDB_VERSION="${TIDB_VERSION:-v8.5.8}"
@@ -77,18 +79,34 @@ down() {
 }
 
 CLUSTER_PORT_OFFSET="${CLUSTER_PORT_OFFSET:-10000}"
-CLUSTER_STATE="$ROOT/target/tidb-cluster"
+CLUSTER_DB="${CLUSTER_DB:-2}"
+CLUSTER_KV="${CLUSTER_KV:-1}"
+CLUSTER_TIFLASH="${CLUSTER_TIFLASH:-1}"
+# Per offset, so a benchmark cluster and the test cluster can run side by side.
+CLUSTER_STATE="$ROOT/target/tidb-cluster-$CLUSTER_PORT_OFFSET"
 
+# One URL per TiDB node, comma-separated (the cluster tests' TISQLX_TEST_CLUSTER).
 cluster_urls() {
-  echo "tidb://root@127.0.0.1:$((4000 + CLUSTER_PORT_OFFSET)),tidb://root@127.0.0.1:$((4001 + CLUSTER_PORT_OFFSET))"
+  local urls=()
+  for i in $(seq 0 $((CLUSTER_DB - 1))); do urls+=("tidb://root@127.0.0.1:$((4000 + i + CLUSTER_PORT_OFFSET))"); done
+  (IFS=,; echo "${urls[*]}")
+}
+
+# One tisqlx URL listing every TiDB node.
+cluster_url() {
+  local hosts=()
+  for i in $(seq 0 $((CLUSTER_DB - 1))); do hosts+=("127.0.0.1:$((4000 + i + CLUSTER_PORT_OFFSET))"); done
+  (IFS=,; echo "tidb://root@${hosts[*]}")
 }
 
 port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 
-# Ready once PD lists a TiFlash store and TiDB answers on its status port.
+# Ready once TiDB answers on its status port and PD lists every TiKV and TiFlash store as Up.
 cluster_ready() {
-  curl -sf "http://127.0.0.1:$((10080 + CLUSTER_PORT_OFFSET))/status" >/dev/null &&
-    curl -sf "http://127.0.0.1:$((2379 + CLUSTER_PORT_OFFSET))/pd/api/v1/stores" | grep -q tiflash
+  curl -sf "http://127.0.0.1:$((10080 + CLUSTER_PORT_OFFSET))/status" >/dev/null || return 1
+  local up
+  up=$(curl -sf "http://127.0.0.1:$((2379 + CLUSTER_PORT_OFFSET))/pd/api/v1/stores" | grep -o '"state_name": *"Up"' | wc -l)
+  [ "$up" -ge $((CLUSTER_KV + CLUSTER_TIFLASH)) ]
 }
 
 cluster_up() {
@@ -102,7 +120,7 @@ cluster_up() {
   done
   mkdir -p "$CLUSTER_STATE"
   # No `--tag`: the playground then deletes its data directory itself when it exits.
-  nohup tiup playground "$TIDB_VERSION" --db 2 --kv 1 --pd 1 --tiflash 1 \
+  nohup tiup playground "$TIDB_VERSION" --db "$CLUSTER_DB" --kv "$CLUSTER_KV" --pd 1 --tiflash "$CLUSTER_TIFLASH" \
     --without-monitor --port-offset "$CLUSTER_PORT_OFFSET" >"$CLUSTER_STATE/playground.log" 2>&1 &
   echo $! >"$CLUSTER_STATE/playground.pid"
   for _ in $(seq 1 120); do
@@ -134,5 +152,6 @@ case "${1:-}" in
   cluster-up) cluster_up ;;
   cluster-down) cluster_down ;;
   cluster-urls) cluster_urls ;;
-  *) echo "usage: $0 up|down|status|url|socket|cluster-up|cluster-down|cluster-urls" >&2; exit 2 ;;
+  cluster-url) cluster_url ;;
+  *) echo "usage: $0 up|down|status|url|socket|cluster-up|cluster-down|cluster-urls|cluster-url" >&2; exit 2 ;;
 esac
