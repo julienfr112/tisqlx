@@ -174,7 +174,7 @@ Arguments accepted for each column type. `&T`, `Option<T>`, `Box<T>`, `Arc<T>` a
 |---|---|
 | `TINYINT`…`BIGINT` (incl. `UNSIGNED`), `BOOLEAN`, `DECIMAL`, `FLOAT`, `DOUBLE`, `BIT`, `YEAR`, and `LIMIT ?`/`OFFSET ?` | `i8`…`i128`, `u8`…`u128`, `f32`, `f64`, `bool`, `Decimal`, `BigDecimal` |
 | `CHAR`, `VARCHAR`, `TEXT`, `ENUM`, `SET`, `VECTOR` | `&str`, `String`, `Cow<str>`, `types::Set`, `types::Vector`, `uuid::fmt::Hyphenated`, derived enums, and JSON values (`serde_json::Value`, `Json<T>`, `&RawValue`) |
-| `BINARY`, `VARBINARY`, `BLOB` | `&[u8]`, `Vec<u8>`, `[u8; N]`, `uuid::Uuid`, and the text types above (not the JSON values) |
+| `BINARY`, `VARBINARY`, `BLOB` | `&[u8]`, `Vec<u8>`, `[u8; N]`, `Cow<[u8]>`, `uuid::Uuid`, and everything accepted for text |
 | `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue`, and text (it must be valid JSON) |
 | `DATE` | `chrono::NaiveDate`, `time::Date`, and the datetime types |
 | `DATETIME`, `TIMESTAMP` | `NaiveDateTime`, `DateTime<Utc \| FixedOffset \| Local>`, `time::PrimitiveDateTime`, `time::OffsetDateTime`, and the date types |
@@ -212,9 +212,9 @@ data is stale.
 |---|---|---|
 | `BOOLEAN`/`TINYINT(1)`, `BIT(1)` | `bool` | |
 | `TINYINT`..`BIGINT` (`UNSIGNED`) | `i8`..`i64` (`u8`..`u64`) | |
-| `BIT(n)`, `YEAR` | `u64`, `u16` | |
+| `BIT(n)`, `YEAR` | `u64` (or `Vec<u8>`), `u16` | |
 | `FLOAT`, `DOUBLE` | `f32`, `f64` | |
-| `DECIMAL` | `Decimal` (up to ~28 digits), `BigDecimal` (any precision, up to TiDB's 65), `i128`/`u128` (integral values), `f64` (rounded) | `decimal`, `bigdecimal` |
+| `DECIMAL` | `Decimal` (up to ~28 significant digits; a wider value is an error, not rounded), `BigDecimal` (any precision, up to TiDB's 65), `i128`/`u128` (integral values), `f32`/`f64` (rounded) | `decimal`, `bigdecimal` |
 | `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` | |
 | `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>` | |
 | `ENUM` | `String`, or a `#[derive(Type)]` enum | |
