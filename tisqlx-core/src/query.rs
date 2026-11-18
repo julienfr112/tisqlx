@@ -116,10 +116,15 @@ impl<'q> Query<'q> {
         self.fetch(executor).try_collect().await
     }
 
-    /// Fetch the first row, or `None`. Remaining rows are discarded.
+    /// Fetch the first row, or `None`. The rest of the response is read and discarded (an
+    /// error in it is returned), which leaves the connection ready for its next use.
     pub async fn fetch_optional<'c, E: Executor<'c>>(self, executor: E) -> Result<Option<Row>> {
         let mut s = self.fetch(executor);
-        s.try_next().await
+        let first = s.try_next().await?;
+        if first.is_some() {
+            while s.try_next().await?.is_some() {}
+        }
+        Ok(first)
     }
 
     /// Fetch exactly the first row, or [`Error::RowNotFound`].
