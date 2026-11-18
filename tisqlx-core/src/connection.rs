@@ -477,8 +477,7 @@ impl TiConnection {
 
     /// Clear the prepared-statement cache, closing every statement on the server.
     pub async fn clear_cached_statements(&mut self) -> Result<()> {
-        let ids: Vec<u32> = self.cache.map.drain().map(|(_, (s, _))| s.id).collect();
-        self.pending_close.extend(ids);
+        self.forget_statements();
         self.wait_until_ready().await?;
         // The closes are only buffered so far. Broken while flushing, as for any write.
         self.phase = Phase::Broken;
@@ -531,6 +530,11 @@ impl TiConnection {
         let packet = self.stream.recv_packet().await?;
         self.phase = prev;
         Ok(packet)
+    }
+
+    /// Empty the statement cache; the statements are closed before the next command.
+    fn forget_statements(&mut self) {
+        self.pending_close.extend(self.cache.map.drain().map(|(_, (s, _))| s.id));
     }
 
     /// Finish whatever a previous (possibly dropped) operation left behind.
@@ -867,6 +871,11 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
     /// Send the command (again, after a stale cached statement was evicted).
     async fn start(&mut self) -> Result<()> {
         let conn = &mut *self.conn;
+        // A prepared statement keeps reading the database that was current when it was
+        // prepared: after a `USE`, a cached one would silently query the old database.
+        if !conn.cache.map.is_empty() && mentions_use(&self.sql) {
+            conn.forget_statements();
+        }
         conn.wait_until_ready().await?;
         if let Some(e) = self.args.as_mut().and_then(|a| a.error.take()) {
             return Err(e);
@@ -949,6 +958,16 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
     }
 }
 
+/// Whether `sql` contains the word `USE`, so may change the current database. A false positive
+/// (a column named `use`, a string) only costs preparing the cached statements again.
+fn mentions_use(sql: &str) -> bool {
+    let b = sql.as_bytes();
+    let is_word = |c: Option<&u8>| c.is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_' || !c.is_ascii());
+    b.windows(3)
+        .enumerate()
+        .any(|(i, w)| w.eq_ignore_ascii_case(b"use") && !(i > 0 && is_word(b.get(i - 1))) && !is_word(b.get(i + 3)))
+}
+
 /// One server to connect to: a host name and port, or one of its resolved addresses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Target {
@@ -993,4 +1012,19 @@ const MAX_COLUMNS: usize = 4096;
 
 fn broken() -> Error {
     Error::protocol("connection is in an unusable state after a cancelled or failed operation")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mentions_use;
+
+    #[test]
+    fn use_statements_are_spotted() {
+        for sql in ["USE db", "use`db`", "SELECT 1;\nUse db", "/* x */use db", "SELECT 1; USE"] {
+            assert!(mentions_use(sql), "{sql}");
+        }
+        for sql in ["", "us", "SELECT used, user, reuse, _use, use_, caf\u{e9}use FROM t", "SELECT 1 FROM house"] {
+            assert!(!mentions_use(sql), "{sql}");
+        }
+    }
 }

@@ -202,6 +202,29 @@ async fn database_name_with_a_backtick() {
 
 #[tokio::test]
 #[ignore = "needs a TiDB: run with `make test-live`"]
+async fn cached_statement_follows_the_current_database() {
+    // A prepared statement keeps the database it was prepared in, and the statement cache is
+    // keyed by the SQL alone: a `USE` must empty it.
+    require_db!();
+    let a = fresh_db("use_a").await;
+    let b = fresh_db("use_b").await;
+    let mut conn = a.connect().await.unwrap();
+    conn.execute_raw(
+        "CREATE TABLE t (v INT); INSERT INTO t VALUES (1);
+         CREATE TABLE tisqlx_t_use_b.t (v BIGINT, w INT); INSERT INTO tisqlx_t_use_b.t VALUES (2, 3)",
+    )
+    .await
+    .unwrap();
+    let v: i64 = query("SELECT * FROM t").fetch_one(&mut conn).await.unwrap().get(0);
+    assert_eq!(v, 1);
+    conn.execute_raw(&format!("USE {}", b.get_database().unwrap())).await.unwrap();
+    let row = query("SELECT * FROM t").fetch_one(&mut conn).await.unwrap();
+    assert_eq!((row.get::<i64, _>("v"), row.get::<i32, _>("w")), (2, 3));
+    assert_eq!(conn.cached_statements_size(), 1);
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn rows_affected_counts_matched_rows() {
     require_db!();
     let opts = fresh_db("foundrows").await;
