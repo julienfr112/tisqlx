@@ -36,8 +36,6 @@ it is tested.
     `auto-tls` generates.
   - `prepare.rs` is only exercised as a subprocess, so coverage does not see it.
   - `executor.rs` is low.
-- [ ] **P3: Fuzz the packet decoders.** `cargo fuzz` targets for `Handshake`, `OkPacket`,
-  `ColumnDefinition` and the row decoders.
 - [ ] **P3: No test for the race between `Pool::close` and a connection being returned.** The
   fix (checking under the idle lock) isn't covered, because the interleaving is hard to force.
 - [ ] **P3: No cluster test for a node restart.** Pool recovery is tested with `KILL`, not with a
@@ -178,6 +176,13 @@ found.
   comparisons (35 types × 14 column kinds). Test: live `null_of_every_type_into_every_column`.
 - A migration that deletes its own record fails with `NotApplied`. Test: live
   `record_deleted_by_the_migration_fails_the_run`.
+
+**Hostile input** (`tisqlx-core/src/robustness.rs`): every packet, row and value decoder gets
+random bytes and corrupted valid packets, and must return an error, never panic. It is a
+deterministic stand-in for `cargo fuzz`, which needs nightly. `TISQLX_FUZZ_ITERS` runs it
+longer; 1M iterations are clean. It found and fixed:
+- a TIME with a huge hour count overflowed: a panic in debug builds, a wrong value in release;
+- a binary DATETIME with microseconds ≥ 10⁶ overflowed the time-zone conversion.
 
 **Features**
 - **`Acquire`:** one function for a pool, a connection, a pooled connection or a transaction;

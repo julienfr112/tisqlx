@@ -111,6 +111,9 @@ impl DateTimeParts {
         if len >= 11 {
             p.micros = r.u32()?;
         }
+        if p.micros >= 1_000_000 {
+            return Err(format!("invalid fractional seconds {} in a binary date/time", p.micros).into());
+        }
         Ok(p)
     }
 
@@ -183,7 +186,7 @@ impl TimeParts {
                 let days = r.u32()? as u64;
                 let (h, m, s) = (r.u8()? as u64, r.u8()? as u64, r.u8()? as u64);
                 let us = if len >= 12 { r.u32()? as u64 } else { 0 };
-                Ok(Self { negative, micros: (((days * 24 + h) * 60 + m) * 60 + s) * 1_000_000 + us })
+                Ok(Self { negative, micros: micros_of(days * 24 + h, m, s, us).ok_or("TIME value out of range")? })
             }
             RowFormat::Text => Self::parse(value.as_str()?),
         }
@@ -201,8 +204,13 @@ impl TimeParts {
             return Err(bad().into());
         }
         let us = if frac.is_empty() { 0 } else { format!("{frac:0<6}").parse::<u64>()? };
-        Ok(Self { negative, micros: ((h * 60 + m) * 60 + sec) * 1_000_000 + us })
+        Ok(Self { negative, micros: micros_of(h, m, sec, us).ok_or_else(bad)? })
     }
+}
+
+/// `h:m:s.us` in microseconds, or `None` on overflow (from hostile or corrupt input).
+fn micros_of(h: u64, m: u64, s: u64, us: u64) -> Option<u64> {
+    h.checked_mul(3600)?.checked_add(m * 60 + s)?.checked_mul(1_000_000)?.checked_add(us)
 }
 
 // ---- std::time::Duration <-> TIME (non-negative)
@@ -256,5 +264,7 @@ mod tests {
         }
         assert!(TimeParts::parse("1:60:00").is_err());
         assert!(TimeParts::parse("1:00:00.1234567").is_err());
+        // Overflowed (debug: panicked; release: wrapped to a wrong value) before.
+        assert!(TimeParts::parse("99999999999999:00:00").is_err());
     }
 }

@@ -19,8 +19,8 @@ pub(crate) fn decode_int(value: &ValueRef<'_>) -> Result<i128, BoxDynError> {
     if value.format == RowFormat::Binary {
         let u = ty.is_unsigned();
         let v = match ty.r#type {
-            ColumnType::Tiny if u => b[0] as i128,
-            ColumnType::Tiny => b[0] as i8 as i128,
+            ColumnType::Tiny if u => u8::from_le_bytes(b.try_into()?) as i128,
+            ColumnType::Tiny => i8::from_le_bytes(b.try_into()?) as i128,
             ColumnType::Short | ColumnType::Year if u || ty.r#type == ColumnType::Year => {
                 u16::from_le_bytes(b.try_into()?) as i128
             }
