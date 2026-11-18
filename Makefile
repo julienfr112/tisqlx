@@ -53,7 +53,7 @@ db-cluster-down:
 
 # Tests that need PD/TiKV/TiFlash and two TiDB nodes (skipped by the other tiers).
 test-cluster:
-	TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_CLUSTER=$$(scripts/tidb.sh cluster-urls) TISQLX_TEST_REQUIRE_CLUSTER=1 \
+	TISQLX_TEST_CLUSTER=$$(scripts/tidb.sh cluster-urls) TISQLX_TEST_REQUIRE_CLUSTER=1 \
 		cargo test -p tisqlx-core --all-features --test live cluster:: -- --include-ignored
 
 fmt:
