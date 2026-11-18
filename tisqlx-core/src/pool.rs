@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use futures_core::future::BoxFuture;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::connection::TiConnection;
+use crate::balance::{Balancer, ServerSlot};
+use crate::connection::{Target, TiConnection};
 use crate::error::{Error, Result};
 use crate::options::ConnectOptions;
 use crate::tidb::{RetryPolicy, Retryable, TxnOptions};
@@ -144,6 +145,7 @@ impl PoolOptions {
             idle: Mutex::new(VecDeque::new()),
             size: Arc::new(AtomicU32::new(0)),
             closed: AtomicBool::new(false),
+            balancer: Balancer::default(),
         });
         if let (Some(period), Ok(handle)) = (inner.maintenance_period(), tokio::runtime::Handle::try_current()) {
             handle.spawn(maintain(Arc::downgrade(&inner), period));
@@ -156,6 +158,8 @@ struct Live {
     raw: TiConnection,
     created_at: Instant,
     _slot: Slot,
+    /// Counts the connection on its server, for balancing (`None` over a Unix socket).
+    _server: Option<ServerSlot>,
 }
 
 /// Counts toward [`Pool::size`] while alive.
@@ -186,6 +190,7 @@ struct PoolInner {
     idle: Mutex<VecDeque<Idle>>,
     size: Arc<AtomicU32>,
     closed: AtomicBool,
+    balancer: Balancer,
 }
 
 /// Periodically retire expired idle connections and top the pool up to
@@ -251,16 +256,54 @@ impl PoolInner {
         self.connect_options.connect_timeout
     }
 
+    /// The servers to balance over: the configured hosts, or with `load_balance_dns`, every
+    /// address they resolve to (a host that fails to resolve stays as is, and fails to connect).
+    async fn targets(&self) -> Vec<Target> {
+        let o = &self.connect_options;
+        let mut targets = Vec::new();
+        for (host, port) in o.get_hosts() {
+            let configured = Target { host: host.to_owned(), port, addr: None };
+            if !o.load_balance_dns {
+                targets.push(configured);
+                continue;
+            }
+            match tokio::time::timeout(o.connect_timeout, tokio::net::lookup_host((host, port))).await {
+                Ok(Ok(addrs)) => {
+                    let before = targets.len();
+                    for addr in addrs {
+                        let t = Target { addr: Some(addr), ..configured.clone() };
+                        if !targets.contains(&t) {
+                            targets.push(t);
+                        }
+                    }
+                    if targets.len() == before {
+                        targets.push(configured);
+                    }
+                }
+                _ => targets.push(configured),
+            }
+        }
+        targets
+    }
+
     /// Open a new connection (counted in `size`) and run the `after_connect` hook.
     async fn open(&self) -> Result<Live> {
         let slot = Slot::new(&self.size);
-        let mut raw = TiConnection::connect_with(&self.connect_options).await?;
+        let (mut raw, server) = if self.connect_options.socket.is_some() {
+            (TiConnection::connect_with(&self.connect_options).await?, None)
+        } else {
+            let plan = self.balancer.plan(self.targets().await);
+            let (raw, i) =
+                TiConnection::connect_any(&self.connect_options, &plan, |i, ok| self.balancer.report(&plan[i], ok))
+                    .await?;
+            (raw, Some(self.balancer.slot(&plan[i])))
+        };
         if let Some(hook) = &self.options.after_connect {
             hook(&mut raw).await?;
             // The hook may have changed `time_zone`.
             raw.reload_time_zone().await?;
         }
-        Ok(Live { raw, created_at: Instant::now(), _slot: slot })
+        Ok(Live { raw, created_at: Instant::now(), _slot: slot, _server: server })
     }
 
     fn release(self: &Arc<Self>, live: Live) {
@@ -315,6 +358,12 @@ impl Pool {
 
     pub fn num_idle(&self) -> usize {
         self.0.idle.lock().unwrap().len()
+    }
+
+    /// Open connections per TiDB server (`host:port`, plus the address with
+    /// `load_balance_dns`), for servers this pool has connected to or tried.
+    pub fn host_connections(&self) -> Vec<(String, u32)> {
+        self.0.balancer.counts()
     }
 
     pub fn is_closed(&self) -> bool {

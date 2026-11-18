@@ -64,7 +64,6 @@ it is tested.
 
 ## Ideas (TiDB-specific)
 
-- Multi-host pools: several TiDB addresses or one DNS name, with health checks.
 - `bulk_insert`: batch rows into multi-row `INSERT`s sized to `max_allowed_packet` and TiDB's
   transaction limits.
 - Large-table scans in primary-key or `_tidb_rowid` ranges, and wrappers for `BATCH ON … LIMIT`.
@@ -189,6 +188,17 @@ longer; 1M iterations are clean. It found and fixed:
 7.5-specific test workarounds were removed. Test: mock `tidb_older_than_the_minimum_is_rejected`.
 
 **Features**
+- **Several TiDB servers per pool:** `tidb://u@a,b,c/db` or `ConnectOptions::hosts`.
+  - Least connections first, with backoff for servers that fail to connect.
+  - Each attempt gets a share of the connect timeout, and only network errors fail over.
+  - `load-balance-dns=true` balances over a DNS name's addresses.
+  - `Pool::host_connections()` and `TiConnection::server_addr()` show the spread.
+  - Tests:
+    - unit: `balance::tests` and URL parsing;
+    - mock: spread over two servers, skipping a dead one; an unresponsive server only costs
+      its share of the timeout; a wrong password doesn't fail over;
+    - live: a dead host in the list, and `localhost` with and without DNS balancing;
+    - cluster: 3/3 over the two TiDB nodes.
 - **`Acquire`:** one function for a pool, a connection, a pooled connection or a transaction;
   `begin()` nests as a savepoint. Test: live `acquire_accepts_pools_connections_and_transactions`.
 - **Fixtures for `#[tisqlx::test]`:** `fixtures("a.sql", ...)` runs SQL files after the

@@ -119,3 +119,18 @@ async fn pessimistic_lock_wait_timeout_is_retryable() {
     drop(wtx);
     tx.commit().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "needs a TiDB cluster: run with `make test-cluster`"]
+async fn pool_spreads_over_both_tidb_nodes() {
+    let Some(nodes) = cluster() else { return };
+    let (a, _) = fresh_cluster_db("spread", &nodes).await;
+    let urls = [&nodes.0, &nodes.1].map(|u| u.parse::<ConnectOptions>().unwrap());
+    let hosts = urls.iter().map(|o| (o.get_host().to_owned(), o.get_port()));
+    let pool = PoolOptions::new().min_connections(6).max_connections(6).connect_with(a.hosts(hosts)).await.unwrap();
+    let conns: Vec<_> = futures_util::future::try_join_all((0..6).map(|_| pool.acquire())).await.unwrap();
+    let mut ports: Vec<u16> = conns.iter().map(|c| c.server_addr().unwrap().port()).collect();
+    ports.sort();
+    let (p0, p1) = (urls[0].get_port(), urls[1].get_port());
+    assert_eq!(ports, [p0, p0, p0, p1, p1, p1], "3 connections on each node");
+}

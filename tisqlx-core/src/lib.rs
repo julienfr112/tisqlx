@@ -5,6 +5,7 @@
 
 pub mod acquire;
 pub mod arguments;
+mod balance;
 #[doc(hidden)]
 pub mod bind_check;
 pub mod connection;

@@ -13,6 +13,9 @@
 //!
 //! It uses the database `tisqlx_bench` (recreated). Never point it at a shared server.
 
+// A benchmark reports on stdout.
+#![allow(clippy::print_stdout)]
+
 use std::time::{Duration, Instant};
 
 use tisqlx_core::{ConnectOptions, Pool, PoolOptions, TiConnection, query, query_as};

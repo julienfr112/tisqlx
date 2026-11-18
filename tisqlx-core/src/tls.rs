@@ -8,7 +8,9 @@ use crate::error::{Error, Result};
 use crate::options::ConnectOptions;
 use crate::protocol::stream::PacketStream;
 
-pub(crate) async fn upgrade(stream: &mut PacketStream, options: &ConnectOptions) -> Result<()> {
+/// Upgrade to TLS, verifying the certificate for `server_name` (the host name, never the
+/// resolved address).
+pub(crate) async fn upgrade(stream: &mut PacketStream, options: &ConnectOptions, server_name: &str) -> Result<()> {
     use tokio_rustls::rustls::pki_types::ServerName;
 
     use crate::protocol::stream::Socket;
@@ -22,7 +24,7 @@ pub(crate) async fn upgrade(stream: &mut PacketStream, options: &ConnectOptions)
             c
         }
     };
-    let server_name = ServerName::try_from(options.host.clone())
+    let server_name = ServerName::try_from(server_name.to_owned())
         .map_err(|e| Error::Tls(format!("invalid TLS server name: {e}").into()))?;
     let connector = tokio_rustls::TlsConnector::from(config);
     let socket = stream.take_socket();

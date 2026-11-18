@@ -131,6 +131,8 @@ pub struct TiConnection {
     server_version: String,
     tidb_version: Option<TiDbVersion>,
     connection_id: u32,
+    /// The server's address (`None` over a Unix socket).
+    server_addr: Option<std::net::SocketAddr>,
     cache: StatementCache,
     /// Statements to close before the next command.
     pending_close: Vec<u32>,
@@ -159,22 +161,74 @@ impl TiConnection {
         Self::connect_with(&url.parse()?).await
     }
 
+    /// Connect with `options`. With several hosts, they are tried in order (see
+    /// [`ConnectOptions::hosts`]).
     pub async fn connect_with(options: &ConnectOptions) -> Result<Self> {
-        tokio::time::timeout(options.connect_timeout, Self::establish(options))
-            .await
-            .map_err(|_| Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out")))?
+        if options.socket.is_some() {
+            return tokio::time::timeout(options.connect_timeout, Self::establish(options, None))
+                .await
+                .map_err(|_| timed_out())?;
+        }
+        let targets: Vec<Target> = options
+            .get_hosts()
+            .into_iter()
+            .map(|(host, port)| Target { host: host.to_owned(), port, addr: None })
+            .collect();
+        Ok(Self::connect_any(options, &targets, |_, _| {}).await?.0)
     }
 
-    async fn establish(options: &ConnectOptions) -> Result<Self> {
-        let socket = match &options.socket {
+    /// Try `targets` in order until one connects; each attempt gets an even share of
+    /// `connect_timeout` (the last one, whatever is left). Only network errors move on to the
+    /// next target: anything else (bad password, not TiDB...) would fail on every one of them.
+    /// `report(i, ok)` is called after each attempt. Returns the connection and its target index.
+    pub(crate) async fn connect_any(
+        options: &ConnectOptions,
+        targets: &[Target],
+        mut report: impl FnMut(usize, bool),
+    ) -> Result<(Self, usize)> {
+        let deadline = tokio::time::Instant::now() + options.connect_timeout;
+        let share = options.connect_timeout / targets.len().max(1) as u32;
+        let mut last = None;
+        for (i, target) in targets.iter().enumerate() {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let budget = if i + 1 == targets.len() { remaining } else { share.min(remaining) };
+            let error = match tokio::time::timeout(budget, Self::establish(options, Some(target))).await {
+                Ok(Ok(conn)) => {
+                    report(i, true);
+                    return Ok((conn, i));
+                }
+                Ok(Err(e)) if !matches!(e, Error::Io(_)) => return Err(e),
+                Ok(Err(e)) => e,
+                Err(_) => timed_out(),
+            };
+            if targets.len() > 1 {
+                log::debug!("cannot connect to {target}: {error}");
+            }
+            report(i, false);
+            last = Some(error);
+        }
+        Err(last.unwrap_or_else(timed_out))
+    }
+
+    /// Open a connection to `target` (`None`: the Unix socket).
+    async fn establish(options: &ConnectOptions, target: Option<&Target>) -> Result<Self> {
+        let (socket, server_addr, tls_name) = match (target, &options.socket) {
             #[cfg(unix)]
-            Some(path) => Socket::Unix(tokio::net::UnixStream::connect(path).await?),
+            (None, Some(path)) => (Socket::Unix(tokio::net::UnixStream::connect(path).await?), None, None),
             #[cfg(not(unix))]
-            Some(_) => return Err(Error::config("unix sockets are not supported on this platform")),
-            None => {
-                let tcp = TcpStream::connect((options.host.as_str(), options.port)).await?;
+            (None, Some(_)) => return Err(Error::config("unix sockets are not supported on this platform")),
+            (None, None) => return Err(Error::config("no host to connect to")),
+            (Some(t), _) => {
+                let tcp = match t.addr {
+                    Some(addr) => TcpStream::connect(addr).await?,
+                    None => TcpStream::connect((t.host.as_str(), t.port)).await?,
+                };
                 tcp.set_nodelay(true)?;
-                Socket::Tcp(tcp)
+                let peer = tcp.peer_addr().ok();
+                (Socket::Tcp(tcp), peer, Some(t.host.as_str()))
             }
         };
         let mut stream = PacketStream::new(socket);
@@ -223,7 +277,7 @@ impl TiConnection {
         if want_tls {
             capabilities |= caps::SSL;
             stream.send_packet(&protocol::encode_ssl_request(capabilities)).await?;
-            crate::tls::upgrade(&mut stream, options).await?;
+            crate::tls::upgrade(&mut stream, options, tls_name.unwrap_or(options.get_host())).await?;
         }
 
         let password = options.password.as_deref().unwrap_or("");
@@ -295,6 +349,7 @@ impl TiConnection {
             server_version: handshake.server_version,
             tidb_version,
             connection_id: handshake.connection_id,
+            server_addr,
             cache: StatementCache { capacity: options.statement_cache_capacity, tick: 0, map: HashMap::new() },
             pending_close: Vec::new(),
             transaction_depth: 0,
@@ -360,6 +415,12 @@ impl TiConnection {
     /// Parsed TiDB version (`None` if the server is not TiDB).
     pub fn tidb_version(&self) -> Option<TiDbVersion> {
         self.tidb_version
+    }
+
+    /// The address of the server this connection is to (`None` over a Unix socket): with
+    /// several hosts, which one it landed on.
+    pub fn server_addr(&self) -> Option<std::net::SocketAddr> {
+        self.server_addr
     }
 
     /// Server-side connection id (usable with `KILL`).
@@ -878,6 +939,29 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
             }
         }
     }
+}
+
+/// One server to connect to: a host name and port, or one of its resolved addresses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Target {
+    /// Also the TLS server name.
+    pub host: String,
+    pub port: u16,
+    /// Connect to this address of `host` only, instead of trying each in turn.
+    pub addr: Option<std::net::SocketAddr>,
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.addr {
+            Some(addr) => write!(f, "{}:{} ({addr})", self.host, self.port),
+            None => write!(f, "{}:{}", self.host, self.port),
+        }
+    }
+}
+
+fn timed_out() -> Error {
+    Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out"))
 }
 
 /// TiDB (like MySQL) allows at most 4096 columns per table or result.

@@ -50,8 +50,12 @@ impl FromStr for SslMode {
 /// `mysql://` scheme is accepted too) or build with the setters.
 #[derive(Clone)]
 pub struct ConnectOptions {
-    pub(crate) host: String,
+    /// TiDB servers, each with its own port or `None` for [`port`](Self::port).
+    pub(crate) hosts: Vec<(String, Option<u16>)>,
+    /// Port of the hosts given without one.
     pub(crate) port: u16,
+    /// Spread pooled connections over every address each host name resolves to.
+    pub(crate) load_balance_dns: bool,
     pub(crate) socket: Option<PathBuf>,
     pub(crate) username: String,
     pub(crate) password: Option<String>,
@@ -72,8 +76,8 @@ pub struct ConnectOptions {
 impl std::fmt::Debug for ConnectOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConnectOptions")
-            .field("host", &self.host)
-            .field("port", &self.port)
+            .field("hosts", &self.get_hosts())
+            .field("load_balance_dns", &self.load_balance_dns)
             .field("socket", &self.socket)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
@@ -95,8 +99,9 @@ impl Default for ConnectOptions {
 impl ConnectOptions {
     pub fn new() -> Self {
         Self {
-            host: "localhost".into(),
+            hosts: vec![("localhost".into(), None)],
             port: DEFAULT_PORT,
+            load_balance_dns: false,
             socket: None,
             username: "root".into(),
             password: None,
@@ -114,13 +119,39 @@ impl ConnectOptions {
         }
     }
 
+    /// Connect to this one host (replaces any list given before).
     pub fn host(mut self, host: &str) -> Self {
-        self.host = host.to_owned();
+        self.hosts = vec![(host.to_owned(), None)];
         self
     }
 
+    /// The port of every host given without its own (default 4000).
     pub fn port(mut self, port: u16) -> Self {
         self.port = port;
+        self
+    }
+
+    /// Several TiDB servers (`host:port`) behind one pool or connection.
+    ///
+    /// A [`Pool`](crate::Pool) opens each new connection on the reachable host with the fewest
+    /// of its connections, and skips a host that fails to connect for a while (backoff from 1 s
+    /// up to 30 s). A single connection tries the hosts in order. Each attempt gets its share of
+    /// `connect_timeout`, so an unresponsive host cannot use it all up. Only network errors move
+    /// on to the next host; a wrong password, say, fails at once. In the URL:
+    /// `tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`.
+    ///
+    /// Existing connections are not moved: after an outage, a recovered host fills up again as
+    /// connections are replaced (`max_lifetime`, `idle_timeout`) or added.
+    pub fn hosts<H: Into<String>>(mut self, hosts: impl IntoIterator<Item = (H, u16)>) -> Self {
+        self.hosts = hosts.into_iter().map(|(h, p)| (h.into(), Some(p))).collect();
+        self
+    }
+
+    /// Spread a pool's connections over all the addresses each host name resolves to, as if
+    /// they were listed one by one (e.g. a Kubernetes headless service). Off by default: then
+    /// a name's addresses are tried in order, like any client does. URL: `load-balance-dns=true`.
+    pub fn load_balance_dns(mut self, yes: bool) -> Self {
+        self.load_balance_dns = yes;
         self
     }
 
@@ -212,12 +243,19 @@ impl ConnectOptions {
         self.database.as_deref()
     }
 
+    /// The first host.
     pub fn get_host(&self) -> &str {
-        &self.host
+        &self.hosts[0].0
     }
 
+    /// The first host's port.
     pub fn get_port(&self) -> u16 {
-        self.port
+        self.hosts[0].1.unwrap_or(self.port)
+    }
+
+    /// Every host, with its port.
+    pub fn get_hosts(&self) -> Vec<(&str, u16)> {
+        self.hosts.iter().map(|(h, p)| (h.as_str(), p.unwrap_or(self.port))).collect()
     }
 
     pub fn get_username(&self) -> &str {
@@ -233,7 +271,9 @@ impl FromStr for ConnectOptions {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        let url = Url::parse(s).map_err(|e| Error::config(format!("invalid database URL: {e}")))?;
+        // `url` accepts one host only: parse a list here and give it the first.
+        let (s, host_list) = split_host_list(s)?;
+        let url = Url::parse(&s).map_err(|e| Error::config(format!("invalid database URL: {e}")))?;
         match url.scheme() {
             "tidb" | "mysql" => {}
             other => {
@@ -243,11 +283,17 @@ impl FromStr for ConnectOptions {
         let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
 
         let mut opts = ConnectOptions::new();
-        if let Some(host) = url.host_str() {
-            opts.host = host.trim_start_matches('[').trim_end_matches(']').to_owned();
-        }
-        if let Some(port) = url.port() {
-            opts.port = port;
+        match host_list {
+            Some(list) => opts.hosts = list,
+            None => {
+                // One host: its port is *the* port, so `host()`/`port()` keep working on it.
+                if let Some(host) = url.host_str() {
+                    opts.hosts = vec![(host.trim_start_matches('[').trim_end_matches(']').to_owned(), None)];
+                }
+                if let Some(port) = url.port() {
+                    opts.port = port;
+                }
+            }
         }
         if !url.username().is_empty() {
             opts.username = decode(url.username());
@@ -272,6 +318,9 @@ impl FromStr for ConnectOptions {
                 "txn-mode" => opts.txn_mode = Some(v.parse()?),
                 "resource-group" => opts.resource_group = Some(v.into_owned()),
                 "socket" => opts.socket = Some(PathBuf::from(&*v)),
+                "load-balance-dns" => {
+                    opts.load_balance_dns = v.parse().map_err(|_| Error::config("invalid load-balance-dns"))?
+                }
                 "connect-timeout" => {
                     let secs: u64 = v.parse().map_err(|_| Error::config("invalid connect-timeout (seconds)"))?;
                     opts.connect_timeout = Duration::from_secs(secs);
@@ -286,6 +335,48 @@ impl FromStr for ConnectOptions {
     }
 }
 
+/// If the URL lists several hosts (`a:4000,b,[::1]:4001`), return it with only the first one,
+/// plus the list.
+#[allow(clippy::type_complexity)]
+fn split_host_list(url: &str) -> Result<(std::borrow::Cow<'_, str>, Option<Vec<(String, Option<u16>)>>)> {
+    let Some(scheme_end) = url.find("://") else { return Ok((url.into(), None)) };
+    let start = scheme_end + 3;
+    let end = url[start..].find(['/', '?', '#']).map_or(url.len(), |i| start + i);
+    let authority = &url[start..end];
+    let hosts_start = authority.rfind('@').map_or(0, |i| i + 1);
+    let list = &authority[hosts_start..];
+    if !list.contains(',') {
+        return Ok((url.into(), None));
+    }
+    let bad = |h: &str| Error::config(format!("invalid host {h:?} in the database URL"));
+    let mut hosts = Vec::new();
+    for h in list.split(',') {
+        let (host, port) = match h.strip_prefix('[') {
+            // [v6] or [v6]:port
+            Some(rest) => {
+                let (v6, after) = rest.split_once(']').ok_or_else(|| bad(h))?;
+                let port = match after {
+                    "" => None,
+                    p => Some(p.strip_prefix(':').ok_or_else(|| bad(h))?),
+                };
+                (v6, port)
+            }
+            None => match h.rsplit_once(':') {
+                Some((host, port)) => (host, Some(port)),
+                None => (h, None),
+            },
+        };
+        if host.is_empty() {
+            return Err(bad(h));
+        }
+        let port = port.map(|p| p.parse::<u16>().map_err(|_| bad(h))).transpose()?;
+        hosts.push((percent_decode_str(host).decode_utf8_lossy().into_owned(), port));
+    }
+    let first = list.split(',').next().unwrap_or_default();
+    let rewritten = format!("{}{}{}", &url[..start + hosts_start], first, &url[end..]);
+    Ok((rewritten.into(), Some(hosts)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,8 +389,7 @@ mod tests {
                 .unwrap();
         assert_eq!(o.username, "u@x");
         assert_eq!(o.password.as_deref(), Some("p/w"));
-        assert_eq!(o.host, "db.example");
-        assert_eq!(o.port, 4001);
+        assert_eq!(o.get_hosts(), [("db.example", 4001)]);
         assert_eq!(o.database.as_deref(), Some("app"));
         assert_eq!(o.ssl_mode, SslMode::VerifyIdentity);
         assert_eq!(o.txn_mode, Some(TxnMode::Optimistic));
@@ -310,7 +400,34 @@ mod tests {
     #[test]
     fn default_port() {
         let o: ConnectOptions = "mysql://root@localhost".parse().unwrap();
-        assert_eq!(o.port, 4000);
+        assert_eq!(o.get_hosts(), [("localhost", 4000)]);
         assert_eq!(o.database, None);
+    }
+
+    #[test]
+    fn host_lists() {
+        let o: ConnectOptions =
+            "tidb://u:p%2C%40w@tidb-0:4001,tidb-1,[::1]:4002,[fe80::1]/app?load-balance-dns=true".parse().unwrap();
+        assert_eq!(o.get_hosts(), [("tidb-0", 4001), ("tidb-1", 4000), ("::1", 4002), ("fe80::1", 4000)]);
+        assert_eq!((o.username.as_str(), o.password.as_deref()), ("u", Some("p,@w")));
+        assert_eq!(o.database.as_deref(), Some("app"));
+        assert!(o.load_balance_dns);
+        // no user info, no path
+        let o: ConnectOptions = "tidb://a,b:5".parse().unwrap();
+        assert_eq!(o.get_hosts(), [("a", 4000), ("b", 5)]);
+        for bad in ["tidb://a,,b", "tidb://a,b:x", "tidb://a,[::1", "tidb://a,[::1]x"] {
+            assert!(bad.parse::<ConnectOptions>().is_err(), "{bad}");
+        }
+        // `port` is the default for hosts without one, set before or after them
+        let o = ConnectOptions::new().host("a").port(4001);
+        assert_eq!(o.get_hosts(), [("a", 4001)]);
+        let o = ConnectOptions::new().port(4001).host("a");
+        assert_eq!(o.get_hosts(), [("a", 4001)]);
+        let o = ConnectOptions::new().hosts([("a", 1), ("b", 2)]).port(4001);
+        assert_eq!(o.get_hosts(), [("a", 1), ("b", 2)]);
+        // a one-host URL's port survives `host()`, and `port()` still changes it
+        let o: ConnectOptions = "tidb://root@127.0.0.1:4100/db".parse().unwrap();
+        assert_eq!(o.clone().host("localhost").get_hosts(), [("localhost", 4100)]);
+        assert_eq!(o.port(4200).get_hosts(), [("127.0.0.1", 4200)]);
     }
 }

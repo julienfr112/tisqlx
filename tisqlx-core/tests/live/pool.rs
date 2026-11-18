@@ -278,3 +278,55 @@ async fn recently_used_connection_killed_by_the_server_fails_once() {
     let one: i64 = query_scalar("SELECT 1").fetch_one(&mut *conn).await.unwrap();
     assert_eq!(one, 1);
 }
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn a_dead_host_in_the_list_is_skipped() {
+    require_db!();
+    let opts = fresh_db("multihost").await;
+    let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
+    let live = (opts.get_host().to_owned(), opts.get_port());
+    let opts = opts.hosts([("127.0.0.1".to_owned(), dead), live]);
+    // A single connection tries the hosts in order.
+    let mut conn = opts.connect().await.unwrap();
+    let one: i64 = query_scalar("SELECT 1").fetch_one(&mut conn).await.unwrap();
+    assert_eq!(one, 1);
+    // A pool keeps working, and keeps the dead host at zero connections.
+    let pool = PoolOptions::new().min_connections(3).max_connections(3).connect_with(opts).await.unwrap();
+    for _ in 0..10 {
+        let one: i64 = query_scalar("SELECT 1").fetch_one(&pool).await.unwrap();
+        assert_eq!(one, 1);
+    }
+    let counts = pool.host_connections();
+    assert!(counts.iter().any(|(h, n)| h.ends_with(&format!(":{dead}")) && *n == 0), "{counts:?}");
+    assert_eq!(counts.iter().map(|(_, n)| n).sum::<u32>(), 3, "{counts:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn localhost_with_and_without_dns_balancing() {
+    // `localhost` resolves to ::1 and 127.0.0.1, while the test TiDB listens on 127.0.0.1 only.
+    require_db!();
+    let opts = fresh_db("localhost").await;
+    let port = opts.get_port();
+    if opts.get_host() != "127.0.0.1" {
+        return; // a remote test server: `localhost` is not it
+    }
+    let local = opts.host("localhost");
+    let pool = PoolOptions::new().max_connections(2).connect_with(local.clone()).await.unwrap();
+    let one: i64 = query_scalar("SELECT 1").fetch_one(&pool).await.unwrap();
+    assert_eq!(one, 1);
+    // Balancing over the addresses: ::1 is refused, backs off, and stays empty.
+    let pool = PoolOptions::new()
+        .min_connections(2)
+        .max_connections(2)
+        .connect_with(local.load_balance_dns(true))
+        .await
+        .unwrap();
+    for _ in 0..5 {
+        let one: i64 = query_scalar("SELECT 1").fetch_one(&pool).await.unwrap();
+        assert_eq!(one, 1);
+    }
+    let counts = pool.host_connections();
+    assert!(counts.iter().any(|(h, n)| h.contains(&format!("127.0.0.1:{port}")) && *n == 2), "{counts:?}");
+}

@@ -24,10 +24,13 @@ pub async fn connect(connect: &ConnectOpts) -> anyhow::Result<TiConnection> {
     connect_server(&connect.url()?.parse().context("invalid database URL")?).await
 }
 
+/// `host:port`, or every host of a list.
+fn hosts(server: &ConnectOptions) -> String {
+    server.get_hosts().iter().map(|(h, p)| format!("{h}:{p}")).collect::<Vec<_>>().join(", ")
+}
+
 async fn connect_server(server: &ConnectOptions) -> anyhow::Result<TiConnection> {
-    TiConnection::connect_with(server)
-        .await
-        .with_context(|| format!("failed to connect to {}:{}", server.get_host(), server.get_port()))
+    TiConnection::connect_with(server).await.with_context(|| format!("failed to connect to {}", hosts(server)))
 }
 
 pub async fn create(connect: &ConnectOpts) -> anyhow::Result<()> {
@@ -42,13 +45,7 @@ pub async fn create(connect: &ConnectOpts) -> anyhow::Result<()> {
 
 pub async fn drop(connect: &ConnectOpts, confirm: bool) -> anyhow::Result<()> {
     let (_, server, db) = split_url(connect.url()?)?;
-    if confirm
-        && !ask(&format!(
-            "Drop database `{db}` on {}:{}? This cannot be undone. [y/N] ",
-            server.get_host(),
-            server.get_port()
-        ))?
-    {
+    if confirm && !ask(&format!("Drop database `{db}` on {}? This cannot be undone. [y/N] ", hosts(&server)))? {
         bail!("aborted");
     }
     let mut conn = connect_server(&server).await?;

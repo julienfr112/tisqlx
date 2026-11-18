@@ -78,7 +78,6 @@ down() {
 
 CLUSTER_PORT_OFFSET="${CLUSTER_PORT_OFFSET:-10000}"
 CLUSTER_STATE="$ROOT/target/tidb-cluster"
-CLUSTER_TAG="tisqlx-cluster-$CLUSTER_PORT_OFFSET"
 
 cluster_urls() {
   echo "tidb://root@127.0.0.1:$((4000 + CLUSTER_PORT_OFFSET)),tidb://root@127.0.0.1:$((4001 + CLUSTER_PORT_OFFSET))"
@@ -102,7 +101,8 @@ cluster_up() {
     fi
   done
   mkdir -p "$CLUSTER_STATE"
-  nohup tiup playground "$TIDB_VERSION" --tag "$CLUSTER_TAG" --db 2 --kv 1 --pd 1 --tiflash 1 \
+  # No `--tag`: the playground then deletes its data directory itself when it exits.
+  nohup tiup playground "$TIDB_VERSION" --db 2 --kv 1 --pd 1 --tiflash 1 \
     --without-monitor --port-offset "$CLUSTER_PORT_OFFSET" >"$CLUSTER_STATE/playground.log" 2>&1 &
   echo $! >"$CLUSTER_STATE/playground.pid"
   for _ in $(seq 1 120); do
@@ -115,12 +115,14 @@ cluster_up() {
 
 cluster_down() {
   if [ -f "$CLUSTER_STATE/playground.pid" ]; then
-    kill "$(cat "$CLUSTER_STATE/playground.pid")" 2>/dev/null || true
+    local pid
+    pid="$(cat "$CLUSTER_STATE/playground.pid")"
+    kill "$pid" 2>/dev/null || true
+    # The playground stops its components one by one (TiFlash takes a while), then deletes
+    # its data directory: wait for that.
+    for _ in $(seq 1 90); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
     rm -f "$CLUSTER_STATE/playground.pid"
   fi
-  # `--tag` keeps the data; let tiup remove this cluster's instance directory.
-  sleep 3
-  tiup clean "$CLUSTER_TAG" >/dev/null 2>&1 || true
 }
 
 case "${1:-}" in

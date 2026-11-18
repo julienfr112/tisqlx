@@ -468,3 +468,80 @@ async fn recently_returned_connection_is_not_pinged() {
     raw_sql("SELECT 1").fetch_one(&mut *conn).await.unwrap();
     mock.finish().await;
 }
+
+// ---- several hosts
+
+/// `host:port` of a mock server URL.
+fn addr_of(url: &str) -> (String, u16) {
+    let hostport = url.trim_start_matches("tidb://root@").split('/').next().unwrap();
+    let (h, p) = hostport.rsplit_once(':').unwrap();
+    (h.to_owned(), p.parse().unwrap())
+}
+
+/// A port nothing listens on (refuses at once).
+async fn dead_port() -> u16 {
+    tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port()
+}
+
+/// Accept the connection, then hold it open until the client goes away.
+async fn serve_until_closed(mut c: Conn) {
+    c.accept().await;
+    while c.recv().await.is_some() {}
+}
+
+fn options(hosts: Vec<(String, u16)>) -> ConnectOptions {
+    ConnectOptions::new().hosts(hosts).ssl_mode(SslMode::Disabled).connect_timeout(Duration::from_secs(2))
+}
+
+#[tokio::test]
+async fn pool_spreads_connections_and_skips_a_dead_host() {
+    let (a, b) = (Mock::start(serve_until_closed).await, Mock::start(serve_until_closed).await);
+    let dead = ("127.0.0.1".to_owned(), dead_port().await);
+    let opts = options(vec![addr_of(&a.url), dead.clone(), addr_of(&b.url)]);
+    let pool = PoolOptions::new().min_connections(2).max_connections(2).connect_with(opts).await.unwrap();
+    let (c1, c2) = (pool.acquire().await.unwrap(), pool.acquire().await.unwrap());
+    let mut used = [c1.server_addr().unwrap().port(), c2.server_addr().unwrap().port()];
+    used.sort();
+    let mut expected = [addr_of(&a.url).1, addr_of(&b.url).1];
+    expected.sort();
+    assert_eq!(used, expected, "one connection on each live host");
+    let counts = pool.host_connections();
+    assert!(counts.iter().any(|(h, n)| h.ends_with(&format!(":{}", dead.1)) && *n == 0), "{counts:?}");
+    drop((c1, c2));
+    pool.close().await;
+    assert!(pool.host_connections().iter().all(|(_, n)| *n == 0), "{:?}", pool.host_connections());
+    a.finish().await;
+    b.finish().await;
+}
+
+#[tokio::test]
+async fn unresponsive_host_only_costs_its_share_of_the_timeout() {
+    // Accepts TCP (kernel backlog) but never sends a handshake, like a hung server.
+    let hung = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let hung_addr = ("127.0.0.1".to_owned(), hung.local_addr().unwrap().port());
+    let live = Mock::start(serve_until_closed).await;
+    let start = std::time::Instant::now();
+    let conn = options(vec![hung_addr, addr_of(&live.url)]).connect().await.unwrap();
+    assert!(start.elapsed() < Duration::from_millis(1900), "took {:?} of the 2 s", start.elapsed());
+    assert_eq!(conn.server_addr().unwrap().port(), addr_of(&live.url).1);
+    conn.close().await.unwrap();
+    live.finish().await;
+}
+
+#[tokio::test]
+async fn non_network_errors_do_not_fail_over() {
+    // A wrong password would fail on every host: return it without trying the next one.
+    let denied = Mock::start(|mut c: Conn| async move {
+        c.handshake("mysql_native_password", DEFAULT_CAPS).await;
+        c.recv().await.expect("handshake response");
+        c.err(1045, "Access denied for user 'root'@'127.0.0.1'").await;
+    })
+    .await;
+    let next = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let next_addr = ("127.0.0.1".to_owned(), next.local_addr().unwrap().port());
+    let err = options(vec![addr_of(&denied.url), next_addr]).connect().await.unwrap_err();
+    assert!(matches!(&err, Error::Database(e) if e.code == 1045), "{err}");
+    let tried = tokio::time::timeout(Duration::from_millis(200), next.accept()).await;
+    assert!(tried.is_err(), "the second host must not be contacted");
+    denied.finish().await;
+}

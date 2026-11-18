@@ -15,7 +15,8 @@ nothing else.
 - **Migrations that match TiDB's semantics.** DDL is never transactional in TiDB, so every
   migration is recorded as *dirty* before it runs. A failure blocks later runs until it is
   repaired.
-- A connection pool, nested transactions via savepoints, and a prepared-statement cache that
+- A connection pool that spreads over several TiDB servers and skips failed ones, nested
+  transactions via savepoints, and a prepared-statement cache that
   survives DDL (also DDL run on another TiDB node).
 - `Acquire`: write a function once and call it with `&pool`, `&mut conn` or `&mut tx`. Its
   `begin()` is a transaction, or a savepoint inside a transaction.
@@ -73,6 +74,24 @@ session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
 
 The driver refuses to connect to a server that isn't TiDB, or to TiDB older than 8.5, unless
 `require-tidb=false`.
+
+**Several TiDB servers.** List them in the URL (`tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`;
+hosts without a port use 4000) or with `ConnectOptions::hosts`.
+- **Balancing:** a `Pool` opens each new connection on the server with the fewest of its
+  connections.
+- **Failover:** a server that fails to connect is skipped for a while, with backoff from 1 s up
+  to 30 s.
+- **Timeouts:** each attempt gets its share of `connect-timeout`, so an unresponsive server
+  can't use it all up.
+- **No failover on other errors:** only network errors move on to the next server; a wrong
+  password fails at once.
+- **Single connections:** `TiConnection::connect` tries the servers in order.
+- **One DNS name with several addresses** (e.g. a Kubernetes headless service): add
+  `load-balance-dns=true` to balance over its addresses.
+- **Moving existing connections:** they stay where they are, so after an outage a recovered
+  server fills up again as connections are replaced or added.
+- **Monitoring:** `Pool::host_connections()` shows the spread, and `server_addr()` on a
+  connection says where it landed.
 
 **Pool checkouts** ping a connection only if it sat idle for at least `ping_after_idle`
 (default 30 s). A connection used moments ago is handed out as is. If the server dropped it
