@@ -193,11 +193,11 @@ impl TiConnection {
             return Err(Error::config("no host to connect to"));
         }
         check_connect_timeout(options)?;
-        let deadline = tokio::time::Instant::now() + options.connect_timeout;
+        let start = tokio::time::Instant::now();
         let share = options.connect_timeout / targets.len() as u32;
         let mut last = None;
         for (i, target) in targets.iter().enumerate() {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = options.connect_timeout.saturating_sub(start.elapsed());
             if remaining.is_zero() {
                 break;
             }
@@ -960,12 +960,21 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
 
 /// Whether a statement of `sql` starts with `USE`, so changes the current database. An index
 /// hint (`FROM t USE INDEX (i)`) doesn't count, or it would empty the cache on every run. A
-/// false positive (a `;` inside a string) only costs preparing the cached statements again.
+/// false positive (a `;` inside a string or a comment) only costs preparing the cached
+/// statements again.
 fn changes_database(sql: &str) -> bool {
     sql.split(';').any(|statement| {
         let mut rest = statement.trim_start();
-        while let Some(comment) = rest.strip_prefix("/*") {
-            rest = comment.split_once("*/").map_or("", |(_, after)| after.trim_start());
+        // Comments before the statement.
+        loop {
+            let after = if let Some(comment) = rest.strip_prefix("/*") {
+                comment.split_once("*/")
+            } else if rest.starts_with("--") || rest.starts_with('#') {
+                rest.split_once('\n')
+            } else {
+                break;
+            };
+            rest = after.map_or("", |(_, after)| after.trim_start());
         }
         let b = rest.as_bytes();
         b.len() >= 3
@@ -1002,14 +1011,14 @@ fn is_host_specific(e: &Error) -> bool {
     }
 }
 
-fn check_connect_timeout(options: &ConnectOptions) -> Result<()> {
+pub(crate) fn check_connect_timeout(options: &ConnectOptions) -> Result<()> {
     if options.connect_timeout.is_zero() {
         return Err(Error::config("connect_timeout must not be zero"));
     }
     Ok(())
 }
 
-fn timed_out() -> Error {
+pub(crate) fn timed_out() -> Error {
     Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out"))
 }
 
@@ -1026,7 +1035,15 @@ mod tests {
 
     #[test]
     fn use_statements_are_spotted() {
-        for sql in ["USE db", " use`db`", "SELECT 1;\nUse db", "/* x */ /* y */use db", "SELECT 1; USE"] {
+        for sql in [
+            "USE db",
+            " use`db`",
+            "SELECT 1;\nUse db",
+            "/* x */ /* y */use db",
+            "SELECT 1; USE",
+            "-- to the other one\nUSE db",
+            "# a\n/* b */\n-- c\n use db",
+        ] {
             assert!(changes_database(sql), "{sql}");
         }
         for sql in [
@@ -1037,6 +1054,8 @@ mod tests {
             "SELECT 1 FROM t USE INDEX (i) WHERE a = ?",
             "SELECT used, `use` FROM house",
             "/* use db */ SELECT 1",
+            "-- use db",
+            "-- x\nSELECT 1 -- y\nuse",
         ] {
             assert!(!changes_database(sql), "{sql}");
         }

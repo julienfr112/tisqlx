@@ -566,6 +566,16 @@ async fn zero_connect_timeout_is_a_configuration_error() {
 }
 
 #[tokio::test]
+async fn huge_connect_timeout_means_no_timeout() {
+    // `Duration::MAX` cannot be added to an `Instant`.
+    let mock = Mock::start(serve_until_closed).await;
+    let opts = options(vec![addr_of(&mock.url)]).connect_timeout(Duration::MAX);
+    let pool = PoolOptions::new().connect_with(opts).await.unwrap();
+    pool.close().await;
+    mock.finish().await;
+}
+
+#[tokio::test]
 async fn clearing_the_statement_cache_closes_the_statements_at_once() {
     let mock = Mock::start(|mut c: Conn| async move {
         c.accept().await;
@@ -624,4 +634,14 @@ async fn empty_session_variable_name_is_a_configuration_error() {
     let err = TiConnection::connect(&format!("{}&=x", mock.url)).await.unwrap_err();
     assert!(matches!(err, Error::Configuration(_)), "{err}");
     mock.finish().await;
+}
+
+#[tokio::test]
+async fn zero_connect_timeout_fails_a_pool_with_a_configuration_error() {
+    let live = Mock::start(|_| async {}).await;
+    for dns in [false, true] {
+        let opts = options(vec![addr_of(&live.url)]).connect_timeout(Duration::ZERO).load_balance_dns(dns);
+        let err = PoolOptions::new().connect_with(opts).await.unwrap_err();
+        assert!(matches!(err, Error::Configuration(_)), "load_balance_dns={dns}: {err}");
+    }
 }

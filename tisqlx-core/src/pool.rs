@@ -11,7 +11,7 @@ use futures_core::future::BoxFuture;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::balance::{Balancer, ServerSlot};
-use crate::connection::{Target, TiConnection};
+use crate::connection::{Target, TiConnection, check_connect_timeout, timed_out};
 use crate::error::{Error, Result};
 use crate::options::ConnectOptions;
 use crate::tidb::{RetryPolicy, Retryable, TxnOptions};
@@ -300,6 +300,8 @@ impl PoolInner {
 
     /// Open a new connection (counted in `size`) and run the `after_connect` hook.
     async fn open(&self) -> Result<Live> {
+        // Checked here for every path: it also bounds name resolution, pings and resets.
+        check_connect_timeout(&self.connect_options)?;
         let slot = Slot::new(&self.size);
         let (mut raw, server) = if self.connect_options.socket.is_some() {
             (TiConnection::connect_with(&self.connect_options).await?, None)
@@ -312,7 +314,7 @@ impl PoolInner {
                 Ok::<_, Error>((raw, Some(self.balancer.slot(&plan[i]))))
             })
             .await
-            .map_err(|_| Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out")))??
+            .map_err(|_| timed_out())??
         };
         if let Some(hook) = &self.options.after_connect {
             hook(&mut raw).await?;
@@ -357,10 +359,6 @@ impl Pool {
 
     pub async fn connect_with(options: ConnectOptions) -> Result<Self> {
         PoolOptions::new().connect_with(options).await
-    }
-
-    pub fn connect_lazy(url: &str) -> Result<Self> {
-        Ok(PoolOptions::new().connect_lazy_with(url.parse()?))
     }
 
     pub fn connect_options(&self) -> &ConnectOptions {
