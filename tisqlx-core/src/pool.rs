@@ -72,6 +72,7 @@ impl PoolOptions {
         self
     }
 
+    /// Connections kept open (default 0), capped at `max_connections`.
     pub fn min_connections(mut self, n: u32) -> Self {
         self.min_connections = n;
         self
@@ -127,7 +128,7 @@ impl PoolOptions {
     pub async fn connect_with(self, options: ConnectOptions) -> Result<Pool> {
         let pool = self.connect_lazy_with(options);
         let options = &pool.0.options;
-        let n = options.min_connections.clamp(1, options.max_connections);
+        let n = options.min_connections.max(1);
         let conns = futures_util::future::try_join_all((0..n).map(|_| pool.acquire())).await?;
         drop(conns);
         Ok(pool)
@@ -137,7 +138,8 @@ impl PoolOptions {
     ///
     /// Inside a tokio runtime this also starts the maintenance task, which closes
     /// connections past `idle_timeout`/`max_lifetime` and reopens up to `min_connections`.
-    pub fn connect_lazy_with(self, options: ConnectOptions) -> Pool {
+    pub fn connect_lazy_with(mut self, options: ConnectOptions) -> Pool {
+        self.min_connections = self.min_connections.min(self.max_connections);
         let inner = Arc::new(PoolInner {
             semaphore: Arc::new(Semaphore::new(self.max_connections as usize)),
             options: self,
@@ -217,7 +219,8 @@ async fn maintain(pool: std::sync::Weak<PoolInner>, period: Duration) {
             let _ = tokio::time::timeout(inner.io_timeout(), raw.close()).await;
         }
         while inner.size.load(Ordering::Acquire) < inner.options.min_connections {
-            // A permit keeps the total within max_connections while connecting.
+            // Idle connections hold no permit: taking one keeps a concurrent `acquire` from
+            // opening a connection too, which could exceed `max_connections`.
             let Ok(permit) = inner.semaphore.clone().try_acquire_owned() else { break };
             match inner.open().await {
                 Ok(live) => inner.release(live),
@@ -398,8 +401,9 @@ impl Pool {
             if expired {
                 // Free the slot now: this acquirer may open a replacement right away.
                 let Live { raw, .. } = live;
+                let timeout = inner.io_timeout();
                 tokio::spawn(async move {
-                    let _ = raw.close().await;
+                    let _ = tokio::time::timeout(timeout, raw.close()).await;
                 });
                 continue;
             }

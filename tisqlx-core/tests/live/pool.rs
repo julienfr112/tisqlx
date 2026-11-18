@@ -114,6 +114,24 @@ async fn pool_size_tracks_every_exit_path() {
 
 #[tokio::test]
 #[ignore = "needs a TiDB: run with `make test-live`"]
+async fn maintenance_never_opens_more_than_max_connections() {
+    require_db!();
+    let opts = fresh_db("poolminmax").await;
+    let pool = PoolOptions::new()
+        .max_connections(2)
+        .min_connections(5)
+        .idle_timeout(Some(Duration::from_millis(100))) // maintenance every 50 ms
+        .connect_with(opts)
+        .await
+        .unwrap();
+    for _ in 0..10 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(pool.size() <= 2, "{} connections open with max_connections = 2", pool.size());
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn dropped_pessimistic_transaction_releases_its_locks() {
     require_db!();
     let opts = fresh_db("poollock").await;
