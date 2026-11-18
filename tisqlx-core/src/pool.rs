@@ -430,7 +430,7 @@ impl Pool {
 
     /// Begin a transaction on a pooled connection.
     pub async fn begin(&self) -> Result<Transaction<'static>> {
-        self.acquire().await?.begin_owned(&TxnOptions::default()).await
+        self.begin_with(&TxnOptions::default()).await
     }
 
     /// Begin a transaction with TiDB options (mode, stale read, isolation...).
@@ -442,7 +442,7 @@ impl Pool {
     /// on TiDB write conflicts / deadlocks with the default [`RetryPolicy`].
     ///
     /// ```ignore
-    /// let id = pool.transaction(|tx| Box::pin(async move {
+    /// pool.transaction(|tx| Box::pin(async move {
     ///     tisqlx::query("UPDATE accounts SET balance = balance - 10 WHERE id = ?").bind(1).execute(&mut **tx).await?;
     ///     Ok::<_, tisqlx::Error>(())
     /// })).await?;

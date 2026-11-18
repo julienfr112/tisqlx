@@ -173,10 +173,6 @@ impl TiDbVersion {
         let patch = digits.parse().unwrap_or(0);
         Some(Self { major, minor, patch })
     }
-
-    pub fn at_least(&self, major: u32, minor: u32) -> bool {
-        (self.major, self.minor) >= (major, minor)
-    }
 }
 
 impl fmt::Display for TiDbVersion {
@@ -295,8 +291,9 @@ impl Retryable for Error {
 }
 
 impl TiConnection {
-    /// Make every read in this session a stale read at most `staleness` old
-    /// (`tidb_read_staleness`, whole seconds); `None` turns it off.
+    /// Make every read in this session a stale read at most `staleness` old; `None` turns it
+    /// off. `tidb_read_staleness` counts whole seconds: fractions are dropped, and anything
+    /// under a second becomes one second.
     pub async fn set_read_staleness(&mut self, staleness: Option<Duration>) -> Result<()> {
         let secs = staleness.map_or(0, |d| d.as_secs().max(1) as i64);
         self.execute_raw(&format!("SET SESSION tidb_read_staleness = '{}'", -secs)).await.map(drop)
@@ -330,7 +327,7 @@ mod tests {
         assert_eq!(TiDbVersion::parse("8.0.11-TiDB-v8.5.8"), Some(TiDbVersion::new(8, 5, 8)));
         assert_eq!(TiDbVersion::parse("5.7.25-TiDB-v6.5.0-serverless"), Some(TiDbVersion::new(6, 5, 0)));
         assert_eq!(TiDbVersion::parse("8.0.36"), None);
-        assert!(TiDbVersion::new(8, 5, 8).at_least(6, 2));
+        assert!(TiDbVersion::new(8, 5, 8) >= TiDbVersion::MINIMUM);
     }
 
     #[test]

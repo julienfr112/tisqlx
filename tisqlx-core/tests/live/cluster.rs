@@ -123,7 +123,7 @@ async fn pessimistic_lock_wait_timeout_is_retryable() {
 #[tokio::test]
 #[ignore = "needs a TiDB cluster: run with `make test-cluster`"]
 async fn pool_spreads_over_both_tidb_nodes() {
-    let Some(nodes) = cluster() else { return };
+    let nodes = require_cluster!();
     let (a, _) = fresh_cluster_db("spread", &nodes).await;
     let urls = [&nodes.0, &nodes.1].map(|u| u.parse::<ConnectOptions>().unwrap());
     let hosts = urls.iter().map(|o| (o.get_host().to_owned(), o.get_port()));
