@@ -11,7 +11,7 @@
 | **Macros (live)** | dedicated TiDB | `tisqlx/tests/macros.rs` compiles the `query!` family online and runs the queries. `tests/ui-query/*.rs` (run by `derives.rs`) checks the query macro compile errors: bind count, bind types, bad column names, bad SQL. | `make test-live` |
 | **`#[tisqlx::test]`** | dedicated TiDB | `tisqlx/tests/test_attr.rs` uses the attribute itself: a database per test, migrations, fixtures, `Result` returns. | `make test-live` |
 | **Cluster** | tiup playground | `tisqlx-core/tests/live/cluster.rs` needs a real cluster: TiFlash reads, DDL on one TiDB node while the other holds a cached statement, stale reads returning old data, and TiKV lock-wait timeouts. | `make db-cluster test-cluster` |
-| **CLI** | both tiers | `tisqlx-cli/tests/cli.rs` runs the real binary: `migrate add`/`build-script` without a DB, and a full lifecycle against TiDB (setup, dry runs, revert, dirty migration, repair). | `make test-unit` / `make test-live` |
+| **CLI** | both tiers | `tisqlx-cli/tests/cli.rs` runs the real binary: `migrate add`/`build-script` without a DB, and a full lifecycle against TiDB (setup, dry runs, revert, dirty migration, repair, a `reset` that can't read its migrations). | `make test-unit` / `make test-live` |
 | **Offline data** | dedicated TiDB | `tisqlx prepare --check`: the committed `.tisqlx/` still matches the schema. | `make prepare-check` |
 
 Every test that needs a database is `#[ignore]`d with the target that runs it, so a plain

@@ -288,7 +288,7 @@ tisqlx migrate add -r create_users    # reversible migration
 tisqlx migrate run | revert [--all] | info        # run and revert take --dry-run
 tisqlx migrate repair 20260101000000 --applied   # after fixing a dirty migration by hand
 tisqlx migrate build-script           # build.rs so migrate!() picks up new files
-tisqlx prepare [--check]              # offline data for query! macros
+tisqlx prepare [--check] [-- <cargo check args>]   # offline data for query! macros
 ```
 
 Every command that needs the database takes `-D <url>` or reads `DATABASE_URL` (a `.env` file

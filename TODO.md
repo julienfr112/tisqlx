@@ -105,8 +105,10 @@ were fixed by inspection only.
 - **Pool pings only after `ping_after_idle`:** mock `recently_returned_connection_is_not_pinged`,
   live `recently_used_connection_killed_by_the_server_fails_once`.
 - **Migration bookkeeping holds up against the migration's own SQL.** The migrations table is
-  qualified with its database, and a migration that leaves a transaction open fails and stays
-  dirty (live `migration_sql_cannot_break_the_bookkeeping`). One that deletes its own record
+  qualified with its database, the connection goes back to its original database after every
+  migration (so a `USE` reaches neither the next migration nor the caller), and a migration
+  that leaves a transaction open fails and stays dirty (live
+  `migration_sql_cannot_break_the_bookkeeping`). One that deletes its own record
   fails with `NotApplied` (live `record_deleted_by_the_migration_fails_the_run`).
 - **The migration lock timeout is rounded up to whole seconds:** unit test in `migrate.rs`.
 - **TiDB older than 8.5 is refused:** mock `tidb_older_than_the_minimum_is_rejected`.
@@ -130,8 +132,10 @@ were fixed by inspection only.
   (`bind_arguments_of_compatible_types`), rejection in `tests/ui-query/bind_types.rs`.
   Unsuffixed numeric literals are classified from the syntax, since their type is still being
   inferred when the check runs.
-- **`tisqlx prepare` honours `-p`/`--package` and `--manifest-path`:** unit tests in
-  `prepare.rs`.
+- **`tisqlx prepare` honours `-p`/`--package` and `--manifest-path`.** `--workspace` and
+  `--all-targets` may be passed again, and with `-p`/`--exclude` the other packages' files are
+  kept and not reported stale: unit tests in `prepare.rs`. A relative `--manifest-path` works
+  from any directory **(no test)**.
 - **(no test)** `describe` times out after 30 s; `query_file!` normalises CRLF, so its offline
   data matches on every OS; the offline lookup stops at the workspace root (the directory with
   `Cargo.lock`).
