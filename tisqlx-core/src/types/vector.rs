@@ -17,10 +17,6 @@ use crate::types::Type;
 pub struct Vector(pub Vec<f32>);
 
 impl Vector {
-    pub fn as_slice(&self) -> &[f32] {
-        &self.0
-    }
-
     /// The text form TiDB accepts, e.g. `[1,2.5,3]`.
     pub fn to_text(&self) -> Result<String, BoxDynError> {
         let mut s = String::with_capacity(2 + self.0.len() * 8);

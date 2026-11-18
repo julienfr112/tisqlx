@@ -11,17 +11,13 @@ use crate::row::ValueRef;
 use crate::type_info::TypeInfo;
 use crate::types::Type;
 
-fn bytes_or_text(ty: &TypeInfo) -> bool {
-    <[u8] as Type>::compatible(ty)
-}
-
 impl Type for Uuid {
     fn type_info() -> TypeInfo {
         <[u8] as Type>::type_info()
     }
 
     fn compatible(ty: &TypeInfo) -> bool {
-        bytes_or_text(ty)
+        <[u8] as Type>::compatible(ty)
     }
 }
 

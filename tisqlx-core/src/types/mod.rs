@@ -7,18 +7,18 @@
 //! | `BIT(n)` | `u64`, `Vec<u8>` |
 //! | `YEAR` | `u16` |
 //! | `FLOAT`, `DOUBLE` | `f32`, `f64` |
-//! | `DECIMAL` | `rust_decimal::Decimal` (`decimal`, ≤ 28 digits), `bigdecimal::BigDecimal` (`bigdecimal`, any precision), `f64` |
+//! | `DECIMAL` | `rust_decimal::Decimal` (`decimal`, ≤ 28 digits), `bigdecimal::BigDecimal` (`bigdecimal`, any precision), `i128`/`u128` (integral values), `f32`/`f64` (rounded) |
 //! | `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` |
 //! | `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>` |
 //! | `ENUM` | `String`, or a `#[derive(Type)]` enum |
 //! | `SET` | [`Set`], `String` |
-//! | `JSON` | `serde_json::Value`, [`Json<T>`] |
+//! | `JSON` | `serde_json::Value`, [`Json<T>`], `&serde_json::value::RawValue` |
 //! | `VECTOR` | [`Vector`] |
 //! | `DATE` | `chrono::NaiveDate`, `time::Date` |
-//! | `DATETIME` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` |
-//! | `TIMESTAMP` | `chrono::DateTime<Utc>`, `time::OffsetDateTime` (UTC session), or the `DATETIME` types |
+//! | `DATETIME`, `TIMESTAMP` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` (the wall time in the session zone) |
+//! | `TIMESTAMP`, `DATETIME` as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>`, `time::OffsetDateTime` (converted from and to the session zone) |
 //! | `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0), `chrono::NaiveTime`, `time::Time` (< 24h) |
-//! | `BINARY(16)` / `CHAR(36)` | `uuid::Uuid` / `uuid::fmt::Hyphenated` (`uuid`) |
+//! | `BINARY(16)`, `CHAR(36)` | `uuid::Uuid` (bytes or text), `uuid::fmt::Hyphenated` (text) (`uuid`) |
 //! | `BIGINT UNSIGNED` | [`Tso`](crate::tidb::Tso) (TiDB timestamp oracle value) |
 //!
 //! Every type also decodes as `Option<T>` for nullable columns.

@@ -124,8 +124,10 @@ macro_rules! impl_wide_int {
 
         impl<'r> Decode<'r> for $t {
             fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
-                if value.type_info.r#type.is_integer() || value.type_info.r#type == ColumnType::Bit {
-                    return Ok(<$t>::try_from(decode_int(&value)?)?);
+                if int_compatible(value.type_info) {
+                    let v = decode_int(&value)?;
+                    return <$t>::try_from(v)
+                        .map_err(|_| format!("value {v} out of range for {}", stringify!($t)).into());
                 }
                 // DECIMAL text: integral values only ("12.000" is fine, "12.5" is not).
                 let s = value.as_str()?.trim();

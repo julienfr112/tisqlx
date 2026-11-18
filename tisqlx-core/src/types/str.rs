@@ -9,17 +9,13 @@ use crate::row::ValueRef;
 use crate::type_info::{ColumnType, TypeInfo};
 use crate::types::Type;
 
-pub(crate) fn text_compatible(ty: &TypeInfo) -> bool {
-    ty.r#type.is_textual()
-}
-
 impl Type for str {
     fn type_info() -> TypeInfo {
         TypeInfo::text(ColumnType::VarString)
     }
 
     fn compatible(ty: &TypeInfo) -> bool {
-        text_compatible(ty)
+        ty.r#type.is_textual()
     }
 }
 
