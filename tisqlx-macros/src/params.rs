@@ -14,7 +14,7 @@
 //! Comparisons only count in the FROM (join conditions), WHERE and SET parts of a statement,
 //! because the column types come from a probe, `SELECT <columns> FROM <the statement's FROM>`,
 //! which the server describes. Subqueries, function arguments, the select list, HAVING, UNION
-//! and CTEs are left unchecked.
+//! and CTEs are left unchecked, and so is a whole statement with an executable comment (`/*! ... */`).
 
 /// What a placeholder is matched against.
 #[derive(Debug, Clone, PartialEq, Eq)]
