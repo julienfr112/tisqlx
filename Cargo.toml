@@ -12,7 +12,7 @@ rust-version = "1.88"
 [workspace.dependencies]
 tisqlx-core = { path = "tisqlx-core", version = "0.1.0", default-features = false }
 tisqlx-macros = { path = "tisqlx-macros", version = "0.1.0" }
-tokio = { version = "1", features = ["net", "io-util", "rt", "sync", "time", "macros", "fs"] }
+tokio = { version = "1", features = ["net", "io-util", "rt", "sync", "time"] }
 futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 thiserror = "2"

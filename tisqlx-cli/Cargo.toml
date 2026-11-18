@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 tisqlx-core.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 clap.workspace = true
 anyhow.workspace = true
 dotenvy.workspace = true

@@ -36,7 +36,7 @@ tokio-rustls.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

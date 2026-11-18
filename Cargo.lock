@@ -1106,7 +1106,6 @@ version = "0.1.0"
 dependencies = [
  "bigdecimal",
  "chrono",
- "futures-util",
  "rust_decimal",
  "serde",
  "serde_json",

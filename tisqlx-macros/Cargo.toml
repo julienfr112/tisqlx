@@ -18,7 +18,7 @@ time = ["tisqlx-core/time"]
 
 [dependencies]
 tisqlx-core.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+tokio.workspace = true
 syn.workspace = true
 quote.workspace = true
 proc-macro2.workspace = true

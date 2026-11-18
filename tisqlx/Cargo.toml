@@ -29,7 +29,6 @@ uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
-futures-util.workspace = true
 trybuild = "1"
 
 [lints]
