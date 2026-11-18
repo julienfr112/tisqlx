@@ -4,14 +4,20 @@ error: #[tisqlx::test] functions must be async
 2 | fn not_async() {}
   | ^^
 
-error: unknown argument; expected `migrations = "dir"`
+error: unknown argument; expected `migrations = "dir"` or `fixtures("file.sql", ...)`
  --> tests/ui/test_attr_errors.rs:4:16
   |
-4 | #[tisqlx::test(fixtures = "x")]
-  |                ^^^^^^^^
+4 | #[tisqlx::test(seed = "x")]
+  |                ^^^^
+
+error: fixture $WORKSPACE/target/tests/trybuild/tisqlx/tests/fixtures/missing.sql not found
+ --> tests/ui/test_attr_errors.rs:7:25
+  |
+7 | #[tisqlx::test(fixtures("tests/fixtures/missing.sql"))]
+  |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: #[tisqlx::test] functions take no argument or one `tisqlx::Pool`
- --> tests/ui/test_attr_errors.rs:8:24
-  |
-8 | async fn two_arguments(a: tisqlx::Pool, b: tisqlx::Pool) {}
-  |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  --> tests/ui/test_attr_errors.rs:11:24
+   |
+11 | async fn two_arguments(a: tisqlx::Pool, b: tisqlx::Pool) {}
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

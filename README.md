@@ -14,7 +14,8 @@ nothing else.
   repaired.
 - A connection pool, nested transactions via savepoints, and a prepared-statement cache that
   survives DDL (also DDL run on another TiDB node).
-- `#[tisqlx::test]`: async tests that each get a throwaway database, with migrations applied.
+- `#[tisqlx::test]`: async tests that each get a throwaway database, with migrations and fixtures
+  applied.
 - Exposes TiDB primitives: `Tso`, `TiDbVersion` feature detection, `AUTO_RANDOM` ids through
   `last_insert_id()`, `tidb_read_staleness`, `tidb_isolation_read_engines` (TiFlash) and
   resource groups.
@@ -205,7 +206,16 @@ offers it. Use `verify-identity` for TiDB Cloud.
 async fn creates_a_user(pool: tisqlx::Pool) {
     tisqlx::query!("INSERT INTO users (name) VALUES (?)", "a").execute(&pool).await.unwrap();
 }
+
+#[tisqlx::test(migrations = "migrations", fixtures("tests/fixtures/users.sql", "tests/fixtures/posts.sql"))]
+async fn lists_posts(pool: tisqlx::Pool) {
+    // users.sql and posts.sql have run, in that order
+}
 ```
+
+Fixtures are SQL files (several statements allowed) applied after the migrations, in the order
+given. Their paths are relative to the crate root, like `migrations`. They are embedded at
+compile time, so editing one rebuilds the tests that use it.
 
 Each test gets its own database (`_tisqlx_test_<name>_<hash>`) on the server named by
 `DATABASE_URL`. The database is recreated at the start of each run and dropped when the test

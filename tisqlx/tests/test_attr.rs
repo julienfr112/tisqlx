@@ -13,6 +13,17 @@ mod needs_database_url {
         assert_eq!(n, 0);
     }
 
+    #[tisqlx::test(migrations = "tests/migrations", fixtures("tests/fixtures/users.sql", "tests/fixtures/posts.sql"))]
+    #[ignore = "needs DATABASE_URL (make test-live)"]
+    async fn applies_fixtures_in_order(pool: Pool) {
+        let names: Vec<String> =
+            tisqlx::query_scalar("SELECT name FROM users ORDER BY name").fetch_all(&pool).await.unwrap();
+        assert_eq!(names, ["alice", "bob"]);
+        // the second fixture saw the first one's rows
+        let titles: Vec<String> = tisqlx::query_scalar("SELECT title FROM posts").fetch_all(&pool).await.unwrap();
+        assert_eq!(titles, ["hello"]);
+    }
+
     #[tisqlx::test]
     #[ignore = "needs DATABASE_URL (make test-live)"]
     async fn returns_results(pool: Pool) -> tisqlx::Result<()> {

@@ -169,3 +169,14 @@ async fn migration_sql_cannot_break_the_bookkeeping() {
     assert_eq!(n, 0, "the open transaction was rolled back");
     assert!(matches!(Migrator::new(&d).unwrap().run_on(&mut conn).await, Err(MigrateError::Dirty(3))));
 }
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn record_deleted_by_the_migration_fails_the_run() {
+    require_db!();
+    let opts = fresh_db("migdeleted").await;
+    let mut conn = opts.connect().await.unwrap();
+    let d = dir("migdeleted", &[("1_self_delete.sql", "DELETE FROM _tisqlx_migrations WHERE version = 1;")]);
+    let err = Migrator::new(&d).unwrap().run_on(&mut conn).await.unwrap_err();
+    assert!(matches!(err, MigrateError::NotApplied(1)), "{err}");
+}

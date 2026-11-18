@@ -335,3 +335,83 @@ async fn wide_integers_and_raw_json() {
     }
     assert!(query("SELECT ?").bind(-big).fetch_one(&mut conn).await.is_ok());
 }
+
+/// A NULL parameter still declares its Rust type's column type (`Option::<T>::None.produces()`);
+/// TiDB must ignore it for every pairing, in writes and in comparisons.
+#[cfg(all(feature = "chrono", feature = "time", feature = "decimal", feature = "bigdecimal", feature = "uuid"))]
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn null_of_every_type_into_every_column() {
+    require_db!();
+    let opts = fresh_db("nulls").await;
+    let mut conn = opts.connect().await.unwrap();
+    let columns = [
+        "BIGINT",
+        "DECIMAL(10,2)",
+        "DOUBLE",
+        "BIT(8)",
+        "YEAR",
+        "VARCHAR(20)",
+        "ENUM('a')",
+        "SET('a')",
+        "VARBINARY(20)",
+        "JSON",
+        "DATE",
+        "DATETIME(6)",
+        "TIMESTAMP(6) NULL",
+        "TIME",
+    ];
+    let defs: Vec<String> = columns.iter().enumerate().map(|(i, c)| format!("c{i} {c}")).collect();
+    conn.execute_raw(&format!("CREATE TABLE t (id INT PRIMARY KEY, {})", defs.join(", "))).await.unwrap();
+    let mut id = 0;
+    macro_rules! nulls {
+        ($($t:ty),* $(,)?) => {$({
+            for i in 0..columns.len() {
+                id += 1;
+                let sql = format!("INSERT INTO t (id, c{i}) VALUES (?, ?)");
+                query(&sql).bind(id).bind(None::<$t>).execute(&mut conn).await
+                    .unwrap_or_else(|e| panic!("None::<{}> into {}: {e}", stringify!($t), columns[i]));
+                let sql = format!("SELECT c{i} IS NULL AND (c{i} = ?) IS NULL FROM t WHERE id = ?");
+                let ok: bool = query_scalar(&sql).bind(None::<$t>).bind(id).fetch_one(&mut conn).await.unwrap();
+                assert!(ok, "None::<{}> vs {}", stringify!($t), columns[i]);
+            }
+        })*};
+    }
+    nulls!(
+        i8,
+        i16,
+        i32,
+        i64,
+        i128,
+        u8,
+        u16,
+        u32,
+        u64,
+        u128,
+        f32,
+        f64,
+        bool,
+        String,
+        Vec<u8>,
+        [u8; 4],
+        rust_decimal::Decimal,
+        bigdecimal::BigDecimal,
+        serde_json::Value,
+        Json<Vec<i32>>,
+        types::Set,
+        Vector,
+        uuid::Uuid,
+        uuid::fmt::Hyphenated,
+        chrono::NaiveDate,
+        chrono::NaiveDateTime,
+        chrono::DateTime<chrono::Utc>,
+        chrono::NaiveTime,
+        chrono::TimeDelta,
+        time::Date,
+        time::PrimitiveDateTime,
+        time::OffsetDateTime,
+        time::Time,
+        time::Duration,
+        std::time::Duration,
+    );
+}

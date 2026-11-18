@@ -12,9 +12,6 @@ it is tested.
 
 ## Correctness
 
-- [ ] **P3: `Option<T>::produces` for `None`.** It declares `T`'s type (e.g. JSON) for a NULL
-  parameter. This is harmless as far as tested (TiDB checks the NULL bitmap first), but it has not
-  been verified for every type.
 - [ ] **P3: A cancelled run on a borrowed connection keeps the migration lock until reused.**
   Pooled connections release it on return. A `&mut TiConnection` releases it at the next
   migrator call on that connection, or when the connection closes.
@@ -43,8 +40,6 @@ it is tested.
   `ColumnDefinition` and the row decoders.
 - [ ] **P3: No test for the race between `Pool::close` and a connection being returned.** The
   fix (checking under the idle lock) isn't covered, because the interleaving is hard to force.
-- [ ] **P3: No test for a record deleted mid-run.** That `run` fails with `NotApplied` when its
-  record disappears is untested.
 - [ ] **P3: No cluster test for a node restart.** Pool recovery is tested with `KILL`, not with a
   real TiDB restart (`tiup playground scale-in`).
 
@@ -66,7 +61,6 @@ it is tested.
   - Network address types for `INET6_ATON` values.
   - The macros can't infer `types::Vector`, because TiDB sends VECTOR columns as text; it needs
     an override.
-- [ ] **P3: Fixtures for `#[tisqlx::test]`.** SQL files applied after the migrations.
 - [ ] **P3: An `Acquire`-style trait.** Lets functions accept a pool, a connection or a
   transaction uniformly.
 - [ ] **P3: Protocol features.** Compression, `LOAD DATA LOCAL INFILE`,
@@ -181,7 +175,16 @@ found.
 `make` target that runs it, so a plain `cargo test` reports them as ignored, not passed.
 `make test-live`/`test-cluster` pass `--include-ignored`.
 
+**More coverage**
+- A NULL parameter of every Rust type is ignored in every column kind, in writes and in
+  comparisons (35 types × 14 column kinds). Test: live `null_of_every_type_into_every_column`.
+- A migration that deletes its own record fails with `NotApplied`. Test: live
+  `record_deleted_by_the_migration_fails_the_run`.
+
 **Features**
+- **Fixtures for `#[tisqlx::test]`:** `fixtures("a.sql", ...)` runs SQL files after the
+  migrations, in order. Tests: `tisqlx/tests/test_attr.rs` (`applies_fixtures_in_order`) and the
+  compile errors in `tests/ui/test_attr_errors.rs`.
 - **`Pool::transaction_retry_if` and `tisqlx::error::is_retryable`,** so retries work with
   `anyhow` and other wrapping error types. Test: live `retry_with_a_foreign_error_type`.
 - **`#[tisqlx::test]` (with `migrations = "dir"`):** a throwaway database per test.

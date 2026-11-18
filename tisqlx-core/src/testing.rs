@@ -28,9 +28,10 @@ pub fn database_name(path: &str) -> String {
     format!("_tisqlx_test_{name}_{hash}")
 }
 
-/// Run a `#[tisqlx::test]` body: create the database, apply `migrator`, call `test`
+/// Run a `#[tisqlx::test]` body: create the database, apply `migrator`, then run each of
+/// `fixtures` (SQL text, possibly several statements), call `test`
 /// with a pool on it, then drop the database. Blocks on a new current-thread runtime.
-pub fn run<F, Fut, R>(path: &str, migrator: Option<&Migrator>, test: F) -> R
+pub fn run<F, Fut, R>(path: &str, migrator: Option<&Migrator>, fixtures: &[&str], test: F) -> R
 where
     F: FnOnce(Pool) -> Fut,
     Fut: Future<Output = R>,
@@ -55,6 +56,10 @@ where
             .expect("connect to the test database");
         if let Some(m) = migrator {
             m.run(&pool).await.expect("apply migrations to the test database");
+        }
+        for (i, sql) in fixtures.iter().enumerate() {
+            let mut conn = pool.acquire().await.expect("connect to the test database");
+            conn.execute_raw(sql).await.unwrap_or_else(|e| panic!("fixture #{} failed: {e}", i + 1));
         }
         let result = test(pool.clone()).await;
         pool.close().await;

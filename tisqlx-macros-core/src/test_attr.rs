@@ -4,18 +4,38 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{FnArg, ItemFn, LitStr};
 
-/// Expand `#[tisqlx::test]` / `#[tisqlx::test(migrations = "dir")]` on `item`.
+/// Expand `#[tisqlx::test]` on `item`. Arguments, both optional:
+/// - `migrations = "dir"`: apply these migrations first;
+/// - `fixtures("a.sql", ...)`: then run these SQL files, in order.
+///
+/// Paths are relative to the crate root (`CARGO_MANIFEST_DIR`).
 pub fn expand(args: TokenStream, item: ItemFn) -> syn::Result<TokenStream> {
     let mut migrations: Option<LitStr> = None;
+    let mut fixtures: Vec<LitStr> = Vec::new();
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("migrations") {
             migrations = Some(meta.value()?.parse()?);
             Ok(())
+        } else if meta.path.is_ident("fixtures") {
+            let content;
+            syn::parenthesized!(content in meta.input);
+            let files = content.parse_terminated(<LitStr as syn::parse::Parse>::parse, syn::Token![,])?;
+            fixtures.extend(files);
+            Ok(())
         } else {
-            Err(meta.error("unknown argument; expected `migrations = \"dir\"`"))
+            Err(meta.error("unknown argument; expected `migrations = \"dir\"` or `fixtures(\"file.sql\", ...)`"))
         }
     });
     syn::parse::Parser::parse2(parser, args)?;
+    let root = crate::describe::manifest_dir().map_err(|e| syn::Error::new(proc_macro2::Span::call_site(), e))?;
+    let mut fixture_paths = Vec::with_capacity(fixtures.len());
+    for f in &fixtures {
+        let path = root.join(f.value());
+        if !path.is_file() {
+            return Err(syn::Error::new(f.span(), format!("fixture {} not found", path.display())));
+        }
+        fixture_paths.push(path.to_string_lossy().into_owned());
+    }
 
     let ItemFn { attrs, vis, sig, block } = item;
     if sig.asyncness.is_none() {
@@ -57,6 +77,7 @@ pub fn expand(args: TokenStream, item: ItemFn) -> syn::Result<TokenStream> {
             ::tisqlx::testing::run(
                 ::core::concat!(::core::module_path!(), "::", ::core::stringify!(#name)),
                 #migrator,
+                &[#( ::std::include_str!(#fixture_paths) ),*],
                 |__pool| #call,
             )
         }
