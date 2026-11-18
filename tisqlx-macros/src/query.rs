@@ -93,6 +93,8 @@ struct ColumnSpec {
     checked: bool,
 }
 
+/// Split a column name `col`, `col!`, `col?`, `col: Type` (or `col!: Type`) into the field name
+/// and its overrides.
 fn parse_override(name: &str) -> (String, Nullability, Option<String>) {
     let (left, ty) = match name.split_once(':') {
         Some((l, t)) => (l.trim(), Some(t.trim().to_owned())),
@@ -105,6 +107,10 @@ fn parse_override(name: &str) -> (String, Nullability, Option<String>) {
     } else {
         (left, Nullability::Inferred)
     };
+    // The name of an unaliased expression (`DATE_FORMAT(d, '%H:%i')`, `id + ?`) is not an override.
+    if base.is_empty() || !base.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return (name.to_owned(), Nullability::Inferred, None);
+    }
     (base.to_owned(), null, ty)
 }
 
@@ -315,6 +321,13 @@ mod tests {
         assert!(matches!(null, Nullability::NonNull));
         assert_eq!(t.as_deref(), Some("i64"));
         assert!(matches!(parse_override("x?").1, Nullability::Nullable));
+        // An unaliased expression is not an override, whatever it contains.
+        for name in ["DATE_FORMAT(created_at, '%H:%i')", "id + ?", "a != b", "?"] {
+            let (n, null, t) = parse_override(name);
+            assert_eq!(n, name);
+            assert!(matches!(null, Nullability::Inferred));
+            assert_eq!(t, None);
+        }
         assert_eq!(field_ident("type", Span::call_site()).unwrap().to_string(), "r#type");
         assert!(field_ident("COUNT(*)", Span::call_site()).is_err());
     }

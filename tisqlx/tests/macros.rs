@@ -198,6 +198,13 @@ async fn query_macros() {
             .unwrap();
     let _: Option<String> = rows[0].title.clone();
 
+    // An unaliased expression whose name looks like an override (`...:%i')`) is taken as it is.
+    let _: Option<String> =
+        tisqlx::query_scalar!("SELECT DATE_FORMAT(created_at, '%H:%i') FROM users WHERE id = ?", id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+
     // query_file!
     let n = tisqlx::query_file_scalar!("tests/queries/count_users.sql").fetch_one(&mut *tx).await.unwrap();
     assert!(n >= 1);
@@ -306,6 +313,17 @@ async fn bind_arguments_of_compatible_types() {
         .await
         .unwrap();
     let _ = by_name("x");
+    // A LIKE pattern is text, whatever the column.
+    let n: i64 = tisqlx::query_scalar!(
+        "SELECT COUNT(*) FROM users WHERE id LIKE ? AND created_at NOT LIKE ? AND name LIKE ?",
+        "1%",
+        "1999-%",
+        "a%"
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert!(n >= 0);
     // Explicit conversion in SQL: a `?` inside a function call is not checked (README workaround).
     let id_text = String::from("-1");
     let found: Option<i64> = tisqlx::query_scalar!("SELECT id FROM users WHERE id = CAST(? AS SIGNED)", id_text)

@@ -1,0 +1,51 @@
+{
+  "query": "SELECT COUNT(*) FROM users WHERE id LIKE ? AND created_at NOT LIKE ? AND name LIKE ?",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "COUNT(*)",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 129,
+          "charset": 63,
+          "max_size": 21
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    null,
+    null,
+    {
+      "type": "VarString",
+      "flags": 4097,
+      "charset": 46,
+      "max_size": 256
+    }
+  ]
+}

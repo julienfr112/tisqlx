@@ -4,7 +4,8 @@
 //! The analysis is lexical and deliberately narrow. Where it is unsure it leaves a parameter
 //! unchecked, never wrong. Recognised, at the top level of the statement (or inside plain
 //! parenthesised conditions):
-//! - `col <op> ?` and `? <op> col`, where `<op>` is a comparison or `[NOT] LIKE`;
+//! - `col <op> ?` and `? <op> col`, where `<op>` is a comparison or `[NOT] LIKE` (LIKE is only
+//!   checked against a text or binary column: its pattern is text whatever the column);
 //! - `col [NOT] IN (?, ...)` and `col [NOT] BETWEEN ? AND ?`;
 //! - `SET col = ?` (UPDATE, `INSERT ... SET`, `ON DUPLICATE KEY UPDATE`);
 //! - `INSERT INTO t (cols) VALUES (?, ...), ...`;
@@ -20,6 +21,9 @@
 pub enum Site {
     /// The column expression `Analysis::partners[i]`.
     Column(usize),
+    /// The other side of `[NOT] LIKE` is `Analysis::partners[i]`. LIKE compares as text
+    /// whatever the column, so this only says something when the column is text or binary.
+    Like(usize),
     /// An unsigned integer (`LIMIT`/`OFFSET`).
     Count,
 }
@@ -50,10 +54,10 @@ impl Analysis {
 }
 
 pub fn analyze(sql: &str) -> Analysis {
-    let toks = tokenize(sql);
+    let (toks, executable_comment) = tokenize(sql);
     let placeholders = toks.iter().filter(|t| t.kind == Kind::Placeholder).count();
     let mut a = Analysis { placeholders, sites: vec![None; placeholders], ..Analysis::default() };
-    if toks.is_empty() {
+    if toks.is_empty() || executable_comment {
         return a;
     }
     Analyzer { sql, toks: &toks, ctx: Vec::new(), a: &mut a }.run();
@@ -84,9 +88,12 @@ struct Tok {
     end: usize,
 }
 
-fn tokenize(sql: &str) -> Vec<Tok> {
+/// The tokens, and whether an executable comment (`/*! ... */`, `/*T![feature] ... */`) was
+/// skipped: TiDB runs its content, so the tokens are then not the whole statement.
+fn tokenize(sql: &str) -> (Vec<Tok>, bool) {
     let b = sql.as_bytes();
     let mut toks = Vec::new();
+    let mut executable_comment = false;
     let mut i = 0;
     let quoted_end = |mut i: usize, q: u8| {
         // `i` is just past the opening quote; a doubled quote is an escaped quote,
@@ -123,6 +130,7 @@ fn tokenize(sql: &str) -> Vec<Tok> {
                 continue;
             }
             b'/' if b.get(i + 1) == Some(&b'*') => {
+                executable_comment |= b[i + 2..].starts_with(b"!") || b[i + 2..].starts_with(b"T!");
                 i = sql[i + 2..].find("*/").map_or(b.len(), |p| i + 2 + p + 2);
                 continue;
             }
@@ -185,7 +193,7 @@ fn tokenize(sql: &str) -> Vec<Tok> {
         };
         toks.push(Tok { kind, start, end: i });
     }
-    toks
+    (toks, executable_comment)
 }
 
 // ---- parenthesis contexts
@@ -364,9 +372,9 @@ impl Analyzer<'_> {
             if self.a.sites[p - 1].is_some() || clause[i] == Clause::Other {
                 continue;
             }
-            if let Some(partner) = self.comparison(i) {
-                let idx = self.partner(partner);
-                self.a.sites[p - 1] = Some(Site::Column(idx));
+            if let Some((column, like)) = self.comparison(i) {
+                let idx = self.partner(column);
+                self.a.sites[p - 1] = Some(if like { Site::Like(idx) } else { Site::Column(idx) });
             }
         }
     }
@@ -550,9 +558,28 @@ impl Analyzer<'_> {
             Some(Kind::Open) => self.ctx[i + 1] == Ctx::Plain,
             Some(Kind::Comma) => true,
             Some(Kind::Op) => matches!(self.text(i), "&&" | "||"),
-            Some(Kind::Word) => self.is_any(i, BEFORE),
+            Some(Kind::Word) => self.is_any(i, BEFORE) && !(self.is(i, "AND") && self.closes_between(i)),
             _ => false,
         }
+    }
+
+    /// Whether the `AND` at `i` is the one of `x BETWEEN y AND z`. What follows it is then `z`,
+    /// not a new condition: `a BETWEEN 1 AND b = ?` is `(a BETWEEN 1 AND b) = ?`.
+    fn closes_between(&self, i: usize) -> bool {
+        let mut level = 0usize;
+        for j in (0..i).rev() {
+            match self.toks[j].kind {
+                Kind::Close => level += 1,
+                Kind::Open if level == 0 => return false,
+                Kind::Open => level -= 1,
+                Kind::Word if level == 0 && self.is(j, "BETWEEN") => return true,
+                Kind::Word if level == 0 && self.is_any(j, &["AND", "OR", "XOR", "WHERE", "ON", "SET"]) => {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     fn boundary_after(&self, i: usize) -> bool {
@@ -574,9 +601,11 @@ impl Analyzer<'_> {
         }
     }
 
-    /// The column placeholder `i` is compared with, assigned to, or listed against.
-    fn comparison(&self, i: usize) -> Option<String> {
-        let colref = |s: usize, e: usize| self.sql[self.toks[s].start..self.toks[e].end].to_owned();
+    /// The column placeholder `i` is compared with, assigned to, or listed against, and whether
+    /// the comparison is a `LIKE`.
+    fn comparison(&self, i: usize) -> Option<(String, bool)> {
+        let colref = |s: usize, e: usize| (self.sql[self.toks[s].start..self.toks[e].end].to_owned(), false);
+        let like = |(column, _): (String, bool), op_end: usize| (column, self.is(op_end - 1, "LIKE"));
         match self.ctx[i] {
             Ctx::Opaque => None,
             Ctx::InList(open) => {
@@ -628,14 +657,14 @@ impl Analyzer<'_> {
                         && self.boundary_before(start.checked_sub(1))
                         && self.boundary_after(i + 1)
                     {
-                        return Some(colref(start, op_start - 1));
+                        return Some(like(colref(start, op_start - 1), i));
                     }
                 }
                 // `? <op> col`
                 let len = self.operator_at(i + 1)?;
                 let end = self.colref_forward(i + 1 + len)?;
                 (self.boundary_before(i.checked_sub(1)) && self.boundary_after(end))
-                    .then(|| colref(i + 1 + len, end - 1))
+                    .then(|| like(colref(i + 1 + len, end - 1), i + 1 + len))
             }
         }
     }
@@ -687,7 +716,7 @@ mod tests {
         a.sites
             .iter()
             .map(|s| match s {
-                Some(Site::Column(i)) => Some(a.partners[*i].clone()),
+                Some(Site::Column(i) | Site::Like(i)) => Some(a.partners[*i].clone()),
                 Some(Site::Count) => Some("#".into()),
                 None => None,
             })
@@ -766,5 +795,33 @@ mod tests {
         assert_eq!(sites("INSERT INTO t (a) SELECT b FROM u WHERE c = ?"), s(&[None]));
         let a = analyze("INSERT INTO db.t (a) VALUES (?)");
         assert_eq!(a.probe(None).as_deref(), Some("SELECT a FROM db.t"));
+    }
+
+    #[test]
+    fn like_patterns_are_told_apart_from_values() {
+        let a = analyze("SELECT a FROM t WHERE a LIKE ? AND b NOT LIKE ? AND ? LIKE c AND d = ?");
+        assert_eq!(a.sites, [Some(Site::Like(0)), Some(Site::Like(1)), Some(Site::Like(2)), Some(Site::Column(3))]);
+    }
+
+    #[test]
+    fn the_and_of_between_does_not_start_a_condition() {
+        // `(a BETWEEN 1 AND b) = ?` and `(a BETWEEN 1 AND ?) = b`: neither `?` is compared with `b`
+        assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND b = ?"), s(&[None]));
+        assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND ? = b"), s(&[None]));
+        assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND b IN (?)"), s(&[None]));
+        assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND b BETWEEN ? AND ?"), s(&[None, None]));
+        // the next AND is a real one
+        assert_eq!(
+            sites("SELECT a FROM t WHERE a BETWEEN (1 + 1) AND 2 AND b = ? AND c BETWEEN ? AND ? AND d = ?"),
+            s(&[Some("b"), Some("c"), Some("c"), Some("d")])
+        );
+    }
+
+    #[test]
+    fn executable_comments_disable_the_analysis() {
+        // TiDB runs the content of `/*! */` (and of `/*T![feature] */`): the real condition is `a + b = ?`
+        assert_eq!(sites("SELECT a FROM t WHERE /*! a + */ b = ?"), s(&[None]));
+        assert_eq!(sites("SELECT a FROM t WHERE /*T![x] a + */ b = ?"), s(&[None]));
+        assert_eq!(sites("SELECT /*+ USE_INDEX(t, i) */ a FROM t WHERE '/*!' = ? AND b = ?"), s(&[None, Some("b")]));
     }
 }

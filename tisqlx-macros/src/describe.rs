@@ -6,6 +6,8 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use tisqlx_core::offline;
+
+use crate::params::Site;
 use tisqlx_core::{ColumnFlags, ColumnType, Describe, TiConnection, TypeInfo};
 
 /// One offline query file.
@@ -14,7 +16,7 @@ pub struct QueryData {
     pub query: String,
     pub describe: Describe,
     /// Per placeholder, the type of the column it is matched against, when inferred (see
-    /// [`crate::params`]). Empty in files written before inference existed: nothing is checked.
+    /// [`crate::params`]). Empty when nothing was inferred: nothing is checked.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_types: Vec<Option<TypeInfo>>,
 }
@@ -33,19 +35,8 @@ struct Env {
 impl Env {
     fn load() -> Result<Self, String> {
         let manifest_dir = manifest_dir()?;
-        let mut vars = HashMap::new();
-        let mut dotenv = None;
-        // The nearest `.env` (crate dir, else an ancestor such as the workspace root); real env wins.
-        for dir in manifest_dir.ancestors() {
-            let path = dir.join(".env");
-            if let Ok(iter) = dotenvy::from_path_iter(&path) {
-                for item in iter.flatten() {
-                    vars.entry(item.0).or_insert(item.1);
-                }
-                dotenv = Some(path);
-                break;
-            }
-        }
+        let (dotenv, mut vars) = nearest_dotenv(&manifest_dir);
+        // The real environment wins over `.env`.
         for key in ["DATABASE_URL", "TISQLX_OFFLINE", "TISQLX_OFFLINE_DIR"] {
             if let Ok(v) = std::env::var(key) {
                 vars.insert(key.to_owned(), v);
@@ -76,6 +67,33 @@ impl Env {
         }
         dirs
     }
+}
+
+/// The nearest `.env` file (in `dir`, else in an ancestor such as the workspace root) and its
+/// variables.
+fn nearest_dotenv(dir: &Path) -> (Option<PathBuf>, HashMap<String, String>) {
+    let mut vars = HashMap::new();
+    for dir in dir.ancestors() {
+        let path = dir.join(".env");
+        // Not a directory: it opens, then every read fails.
+        if !path.is_file() {
+            continue;
+        }
+        if let Ok(iter) = dotenvy::from_path_iter(&path) {
+            for item in iter {
+                match item {
+                    Ok((key, value)) => {
+                        vars.entry(key).or_insert(value);
+                    }
+                    // A read error repeats forever; a malformed line is skipped.
+                    Err(dotenvy::Error::Io(_)) => break,
+                    Err(_) => {}
+                }
+            }
+            return (Some(path), vars);
+        }
+    }
+    (None, vars)
 }
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -129,8 +147,11 @@ async fn describe_and_infer(
         .sites
         .iter()
         .map(|site| match site {
-            Some(crate::params::Site::Column(i)) => columns[*i],
-            Some(crate::params::Site::Count) => Some(count),
+            Some(Site::Column(i)) => columns[*i],
+            Some(Site::Like(i)) => columns[*i].filter(|ty| {
+                crate::rust_types::bind_column_kind(ty).is_some_and(|kind| kind == "Text" || kind == "Bytes")
+            }),
+            Some(Site::Count) => Some(count),
             None => None,
         })
         .collect();
@@ -194,9 +215,15 @@ fn read_offline(env: &Env, sql: &str) -> Result<(QueryData, PathBuf), String> {
             return Ok((data, path));
         }
     }
-    Err(format!(
-        "query not found in offline data ({name}); run `tisqlx prepare` with DATABASE_URL set, or unset TISQLX_OFFLINE"
-    ))
+    Err(if env.offline() {
+        format!(
+            "query not found in offline data ({name}); run `tisqlx prepare` with DATABASE_URL set, or unset TISQLX_OFFLINE"
+        )
+    } else {
+        format!(
+            "DATABASE_URL is not set, and the query is not in the offline data ({name}); set it, or run `tisqlx prepare`"
+        )
+    })
 }
 
 fn write_offline(dir: &Path, data: &QueryData) -> Result<(), String> {
@@ -244,4 +271,28 @@ pub fn describe(sql: &str) -> Result<Described, String> {
         write_offline(Path::new(dir), &data)?;
     }
     Ok(Described { describe: data.describe, param_types: data.param_types, inputs })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `.env` is also a common name for a Python virtualenv directory.
+    #[test]
+    fn a_directory_named_dotenv_is_skipped() {
+        let root = std::env::temp_dir().join(format!("tisqlx-dotenv-{}", std::process::id()));
+        let krate = root.join("crate");
+        std::fs::create_dir_all(krate.join(".env")).unwrap();
+        std::fs::write(root.join(".env"), "DATABASE_URL=tidb://x\nnot a valid line\nTISQLX_OFFLINE=true\n").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dir = krate.clone();
+        std::thread::spawn(move || tx.send(nearest_dotenv(&dir)));
+        let found = rx.recv_timeout(std::time::Duration::from_secs(10));
+        std::fs::remove_dir_all(&root).unwrap();
+        let (path, vars) = found.expect("reading `.env` hangs");
+        assert_eq!(path, Some(root.join(".env")));
+        assert_eq!(vars.get("DATABASE_URL").map(String::as_str), Some("tidb://x"));
+        // a malformed line is skipped, not the rest of the file
+        assert_eq!(vars.get("TISQLX_OFFLINE").map(String::as_str), Some("true"));
+    }
 }

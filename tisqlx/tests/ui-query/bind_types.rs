@@ -13,6 +13,8 @@ fn main() {
     let _ = tisqlx::query!("SELECT id FROM users WHERE name = ?", 5);
     // a derived newtype is checked like its field
     let _ = tisqlx::query!("SELECT id FROM users WHERE name = ?", UserId(1));
+    // a number for the pattern of a VARCHAR column
+    let _ = tisqlx::query!("SELECT id FROM users WHERE name LIKE ?", 5i64);
     // text for LIMIT
     let _ = tisqlx::query!("SELECT id FROM users LIMIT ?", "10");
 }
