@@ -176,7 +176,7 @@ pub fn build_script(source: &Path, force: bool) -> anyhow::Result<()> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn load(source: &Path, ignore_missing: bool) -> anyhow::Result<Migrator> {
+pub fn load(source: &Path, ignore_missing: bool) -> anyhow::Result<Migrator> {
     let mut m =
         Migrator::new(source).with_context(|| format!("failed to load migrations from {}", source.display()))?;
     m.ignore_missing = ignore_missing;

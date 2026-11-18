@@ -57,6 +57,8 @@ pub async fn drop(connect: &ConnectOpts, confirm: bool) -> anyhow::Result<()> {
 }
 
 pub async fn reset(source: &Path, connect: &ConnectOpts, confirm: bool) -> anyhow::Result<()> {
+    // Before dropping anything: unreadable migrations would leave no database at all.
+    crate::migrate::load(source, false)?;
     drop(connect, confirm).await?;
     setup(source, connect).await
 }

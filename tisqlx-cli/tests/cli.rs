@@ -100,6 +100,12 @@ fn migration_lifecycle_against_tidb() {
     let info = ok(tisqlx(&d, url, &["migrate", "info"]));
     assert_eq!(info.lines().filter(|l| l.contains("applied")).count(), 2, "{info}");
 
+    // reset reads the migrations before it drops anything
+    let e = fail(tisqlx(&d, url, &["database", "reset", "-y", "--source", "nowhere"]));
+    assert!(e.contains("reading migrations directory nowhere"), "{e}");
+    let info = ok(tisqlx(&d, url, &["migrate", "info"]));
+    assert_eq!(info.lines().filter(|l| l.contains("applied")).count(), 2, "{info}");
+
     assert!(ok(tisqlx(&d, url, &["migrate", "revert", "--dry-run"])).contains("Would revert 2/b"));
     assert!(ok(tisqlx(&d, url, &["migrate", "revert", "--all"])).contains("Reverted 1/a"));
     assert!(ok(tisqlx(&d, url, &["migrate", "info"])).contains("pending"));

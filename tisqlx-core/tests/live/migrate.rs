@@ -193,3 +193,22 @@ async fn record_deleted_by_the_migration_fails_the_run() {
     let err = Migrator::new(&d).unwrap().run_on(&mut conn).await.unwrap_err();
     assert!(matches!(err, MigrateError::NotApplied(1)), "{err}");
 }
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn lock_held_by_another_runner_times_out() {
+    require_db!();
+    let opts = fresh_db("miglock").await;
+    let d = dir("miglock", &[("1_slow.sql", "SELECT SLEEP(3);")]);
+    let slow = Migrator::new(&d).unwrap();
+    let quick = Migrator { lock_timeout: std::time::Duration::from_secs(1), ..slow.clone() };
+    let (mut c1, mut c2) = (opts.connect().await.unwrap(), opts.connect().await.unwrap());
+    let (held, waited) = tokio::join!(slow.run_on(&mut c1), async {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        quick.run_on(&mut c2).await
+    });
+    held.unwrap();
+    assert!(matches!(waited, Err(MigrateError::LockTimeout(_))), "{waited:?}");
+    // the lock was released: the same connection gets it now
+    quick.run_on(&mut c2).await.unwrap();
+}

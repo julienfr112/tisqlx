@@ -17,7 +17,7 @@ pub struct Opt {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Create, drop or reset the database named in the database URL.
+    /// Create, drop, reset or set up the database named in the database URL.
     #[command(alias = "db")]
     Database {
         #[command(subcommand)]
@@ -77,7 +77,8 @@ pub enum MigrateCommand {
         /// Only list the migrations that would be applied.
         #[arg(long)]
         dry_run: bool,
-        /// Ignore applied migrations that are missing from the migrations directory.
+        /// Accept applied migrations that are missing from the migrations directory, and apply
+        /// pending ones older than the latest applied.
         #[arg(long)]
         ignore_missing: bool,
         /// Apply migrations up to and including this version.

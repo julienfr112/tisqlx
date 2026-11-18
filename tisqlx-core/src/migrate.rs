@@ -2,7 +2,9 @@
 //!
 //! Migration files live in a directory and are named either
 //! `<VERSION>_<DESCRIPTION>.sql` (simple) or
-//! `<VERSION>_<DESCRIPTION>.up.sql` / `.down.sql` (reversible).
+//! `<VERSION>_<DESCRIPTION>.up.sql` / `.down.sql` (reversible). Simple migrations may
+//! only come before the first reversible one. Each file is sent as is, as one
+//! multi-statement command.
 //!
 //! TiDB commits DDL implicitly, so a migration cannot be atomic. tisqlx records
 //! the migration as *dirty* before running it and marks it successful afterwards;
@@ -21,7 +23,8 @@ use crate::pool::Pool;
 use crate::query::{query, query_as};
 use crate::util::quote_ident;
 
-pub const DEFAULT_TABLE: &str = "_tisqlx_migrations";
+/// The table recording applied migrations, in the database the connection is on.
+pub const TABLE: &str = "_tisqlx_migrations";
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -59,8 +62,8 @@ pub enum MigrateError {
     #[error("migration {0} is partially applied (dirty); fix the database manually, then run `repair`")]
     Dirty(i64),
 
-    #[error("cannot mix reversible migrations with simple migrations")]
-    InvalidMixReversibleAndSimple,
+    #[error("simple migration {0} comes after a reversible one; simple migrations must all be older")]
+    SimpleAfterReversible(i64),
 
     #[error("could not acquire the migration lock within {0:?}")]
     LockTimeout(Duration),
@@ -166,7 +169,7 @@ pub fn resolve_dir(dir: impl AsRef<Path>) -> Result<Vec<(Migration, PathBuf)>, M
             .parse()
             .map_err(|_| MigrateError::Source(format!("migration file {name:?} has a non-numeric version").into()))?;
         let migration_type = MigrationType::from_filename(name);
-        let description = rest.trim_end_matches(migration_type.suffix()).replace('_', " ");
+        let description = rest.strip_suffix(migration_type.suffix()).unwrap_or(rest).replace('_', " ");
         let sql = std::fs::read_to_string(&path)
             .map_err(|e| MigrateError::Source(format!("reading {}: {e}", path.display()).into()))?;
         migrations.push((Migration::new(version, description.into(), migration_type, sql.into()), path));
@@ -196,7 +199,6 @@ pub struct Migrator {
     pub migrations: Cow<'static, [Migration]>,
     /// Tolerate applied migrations that are missing locally, and pending ones older than the latest applied.
     pub ignore_missing: bool,
-    pub table_name: Cow<'static, str>,
     /// How long to wait for the migration lock (`GET_LOCK`).
     pub lock_timeout: Duration,
 }
@@ -204,12 +206,7 @@ pub struct Migrator {
 impl Migrator {
     /// Construct from pre-built migrations (used by the `migrate!` macro).
     pub const fn from_static(migrations: &'static [Migration]) -> Self {
-        Self {
-            migrations: Cow::Borrowed(migrations),
-            ignore_missing: false,
-            table_name: Cow::Borrowed(DEFAULT_TABLE),
-            lock_timeout: Duration::from_secs(600),
-        }
+        Self { migrations: Cow::Borrowed(migrations), ignore_missing: false, lock_timeout: Duration::from_secs(600) }
     }
 
     /// Load migrations from a directory at runtime.
@@ -223,18 +220,14 @@ impl Migrator {
         self.migrations.iter().find(|m| m.version == version && m.migration_type.is_up())
     }
 
-    fn table(&self) -> String {
-        quote_ident(&self.table_name)
-    }
-
+    /// Simple migrations are allowed only before the first reversible one.
     fn check_mix(&self) -> Result<(), MigrateError> {
-        // Simple migrations are allowed only before the first reversible one.
-        let first_rev = self.migrations.iter().find(|m| m.migration_type.is_reversible()).map(|m| m.version);
-        match first_rev {
-            Some(first) if self.migrations.iter().any(|m| !m.migration_type.is_reversible() && m.version > first) => {
-                Err(MigrateError::InvalidMixReversibleAndSimple)
-            }
-            _ => Ok(()),
+        let Some(first) = self.migrations.iter().find(|m| m.migration_type.is_reversible()) else {
+            return Ok(());
+        };
+        match self.migrations.iter().find(|m| !m.migration_type.is_reversible() && m.version > first.version) {
+            Some(simple) => Err(MigrateError::SimpleAfterReversible(simple.version)),
+            None => Ok(()),
         }
     }
 
@@ -344,7 +337,7 @@ impl Migrator {
         version: i64,
         applied: bool,
     ) -> Result<(), MigrateError> {
-        let table = self.qualified_table(&db);
+        let table = Self::qualified_table(&db);
         if !applied && self.applied(conn).await?.iter().any(|a| a.version == version && a.success) {
             return Err(MigrateError::NotDirty(version));
         }
@@ -371,8 +364,7 @@ impl Migrator {
     pub async fn applied(&self, conn: &mut TiConnection) -> Result<Vec<AppliedMigration>, MigrateError> {
         type Record = (i64, String, bool, Vec<u8>, i64);
         let rows: Result<Vec<Record>, Error> = query_as(format!(
-            "SELECT version, description, success, checksum, execution_time FROM {} ORDER BY version",
-            self.table()
+            "SELECT version, description, success, checksum, execution_time FROM {TABLE} ORDER BY version"
         ))
         .fetch_all(&mut *conn)
         .await;
@@ -408,7 +400,7 @@ impl Migrator {
         })?;
         // A previous run on this connection may have been cancelled while holding the lock.
         conn.release_user_locks().await?;
-        let lock_name = Self::lock_name(&db, &self.table_name);
+        let lock_name = Self::lock_name(&db);
         // Set before GET_LOCK: if this future is dropped from here on, a pooled
         // connection releases the lock when it is returned (`reset_session`).
         conn.user_locks = true;
@@ -432,22 +424,21 @@ impl Migrator {
     }
 
     /// `GET_LOCK` names are limited to 64 characters.
-    fn lock_name(db: &str, table: &str) -> String {
-        let hash = crate::util::hex(&Sha384::digest(format!("{db}.{table}").as_bytes())[..16]);
+    fn lock_name(db: &str) -> String {
+        let hash = crate::util::hex(&Sha384::digest(format!("{db}.{TABLE}").as_bytes())[..16]);
         format!("tisqlx_migrate_{hash}")
     }
 
     async fn ensure_table(&self, conn: &mut TiConnection) -> Result<(), MigrateError> {
         conn.execute_raw(&format!(
-            "CREATE TABLE IF NOT EXISTS {} (
+            "CREATE TABLE IF NOT EXISTS {TABLE} (
                 version BIGINT PRIMARY KEY,
                 description TEXT NOT NULL,
                 installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 success BOOLEAN NOT NULL,
                 checksum VARBINARY(64) NOT NULL,
                 execution_time BIGINT NOT NULL
-            )",
-            self.table()
+            )"
         ))
         .await?;
         Ok(())
@@ -455,8 +446,8 @@ impl Migrator {
 
     /// The migrations table qualified with `db`, so that migration SQL running
     /// `USE other` cannot redirect the bookkeeping.
-    fn qualified_table(&self, db: &str) -> String {
-        format!("{db}.{}", self.table())
+    fn qualified_table(db: &str) -> String {
+        format!("{db}.{TABLE}")
     }
 
     /// Run the SQL of `m`, then undo what it may have done to the session.
@@ -479,7 +470,7 @@ impl Migrator {
     }
 
     async fn run_locked(&self, conn: &mut TiConnection, db: String, target: Option<i64>) -> Result<(), MigrateError> {
-        let table = self.qualified_table(&db);
+        let table = Self::qualified_table(&db);
         self.ensure_table(conn).await?;
         let applied = self.applied(conn).await?;
         for m in self.pending(&applied, target)? {
@@ -509,7 +500,7 @@ impl Migrator {
     }
 
     async fn undo_locked(&self, conn: &mut TiConnection, db: String, target: Option<i64>) -> Result<(), MigrateError> {
-        let table = self.qualified_table(&db);
+        let table = Self::qualified_table(&db);
         let applied = self.applied(conn).await?;
         for down in self.to_revert(&applied, target)? {
             let version = down.version;
@@ -636,7 +627,7 @@ mod tests {
         let mut ms = reversible(&[1]).migrations.into_owned();
         ms.push(m(2, MigrationType::Simple, "S"));
         let mig = Migrator { migrations: Cow::Owned(ms), ..Migrator::from_static(&[]) };
-        assert!(matches!(mig.pending(&[], None), Err(MigrateError::InvalidMixReversibleAndSimple)));
+        assert!(matches!(mig.pending(&[], None), Err(MigrateError::SimpleAfterReversible(2))));
         // simple before the first reversible one is fine
         let mut ms = simple(&[1]).migrations.into_owned();
         ms.extend(reversible(&[2]).migrations.iter().cloned());
