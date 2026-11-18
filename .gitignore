@@ -1,0 +1,8 @@
+/target
+/tisqlx/wip
+
+# Local reference checkout of upstream sqlx (not part of tisqlx)
+/sqlx/
+/.gitmodules
+# Written by a local tidb-server started in the repo root
+/tidb-slow.log

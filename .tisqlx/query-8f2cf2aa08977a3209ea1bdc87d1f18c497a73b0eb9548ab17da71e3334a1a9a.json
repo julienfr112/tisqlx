@@ -1,0 +1,71 @@
+{
+  "query": "SELECT MAX(id) AS `max_id!`, COUNT(*) AS cnt, status AS `status: Status`, email AS `email!: String` FROM users WHERE id = ? GROUP BY status, email",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "max_id!",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 4098,
+          "charset": 63,
+          "max_size": 20
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "cnt",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 129,
+          "charset": 63,
+          "max_size": 21
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "status: Status",
+        "org_name": "status",
+        "type_info": {
+          "type": "String",
+          "flags": 257,
+          "charset": 46,
+          "max_size": 24
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "email!: String",
+        "org_name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": 0,
+          "charset": 46,
+          "max_size": 1020
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  }
+}

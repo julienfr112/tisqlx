@@ -1,0 +1,5 @@
+error: column name "COUNT(*)" is not a valid Rust identifier; give it an alias, e.g. `... AS my_col`
+ --> tests/ui-query/bad_column_name.rs:2:28
+  |
+2 |     let _ = tisqlx::query!("SELECT COUNT(*) FROM users");
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

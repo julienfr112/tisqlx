@@ -1,0 +1,22 @@
+{
+  "query": "SELECT MAX(id) FROM users",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "MAX(id)",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 4098,
+          "charset": 63,
+          "max_size": 20
+        },
+        "decimals": 0
+      }
+    ],
+    "params": []
+  }
+}

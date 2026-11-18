@@ -1,0 +1,5 @@
+error: error describing query: 1054 (42S22): Unknown column 'nope' in 'field list'
+ --> tests/ui-query/bad_sql.rs:2:28
+  |
+2 |     let _ = tisqlx::query!("SELECT nope FROM users");
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^

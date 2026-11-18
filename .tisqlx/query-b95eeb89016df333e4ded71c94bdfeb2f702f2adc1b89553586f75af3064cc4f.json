@@ -1,0 +1,29 @@
+{
+  "query": "SELECT COUNT(*) FROM users WHERE name = ?",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "COUNT(*)",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 129,
+          "charset": 63,
+          "max_size": 21
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  }
+}

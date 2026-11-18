@@ -1,0 +1,22 @@
+{
+  "query": "SELECT COUNT(*) AS n FROM users\n",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "n",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 129,
+          "charset": 63,
+          "max_size": 21
+        },
+        "decimals": 0
+      }
+    ],
+    "params": []
+  }
+}

@@ -1,0 +1,5 @@
+error: query_scalar! expects exactly 1 column, query returns 2
+ --> tests/ui-query/scalar_two_columns.rs:2:35
+  |
+2 |     let _ = tisqlx::query_scalar!("SELECT id, name FROM users");
+  |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

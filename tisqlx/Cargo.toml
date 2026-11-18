@@ -1,0 +1,36 @@
+[package]
+name = "tisqlx"
+description = "Async, pure-Rust SQL toolkit built specifically for TiDB (tokio + rustls), with compile-time checked queries."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme = "../README.md"
+
+[features]
+default = ["macros", "chrono", "decimal"]
+macros = ["dep:tisqlx-macros"]
+chrono = ["tisqlx-core/chrono", "dep:chrono", "tisqlx-macros?/chrono"]
+decimal = ["tisqlx-core/decimal", "dep:rust_decimal", "tisqlx-macros?/decimal"]
+bigdecimal = ["tisqlx-core/bigdecimal", "dep:bigdecimal", "tisqlx-macros?/bigdecimal"]
+time = ["tisqlx-core/time", "dep:time", "tisqlx-macros?/time"]
+uuid = ["tisqlx-core/uuid", "dep:uuid"]
+
+[dependencies]
+tisqlx-core.workspace = true
+tisqlx-macros = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+chrono = { workspace = true, optional = true }
+rust_decimal = { workspace = true, optional = true }
+bigdecimal = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+futures-util.workspace = true
+trybuild = "1"
+
+[lints]
+workspace = true

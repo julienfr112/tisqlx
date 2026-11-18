@@ -1,0 +1,7 @@
+error: FromRow can only be derived for structs
+ --> tests/ui/from_row_enum.rs:2:1
+  |
+2 | / enum E {
+3 | |     A,
+4 | | }
+  | |_^

@@ -1,0 +1,78 @@
+{
+  "query": "SELECT tags, flag, big, small, ubin AS `ubin: Uuid` FROM typed WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "schema": "tisqlx_macros",
+        "table": "typed",
+        "org_table": "typed",
+        "name": "tags",
+        "org_name": "tags",
+        "type_info": {
+          "type": "String",
+          "flags": 6145,
+          "charset": 46,
+          "max_size": 20
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "typed",
+        "org_table": "typed",
+        "name": "flag",
+        "org_name": "flag",
+        "type_info": {
+          "type": "Bit",
+          "flags": 4129,
+          "charset": 63,
+          "max_size": 1
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "typed",
+        "org_table": "typed",
+        "name": "big",
+        "org_name": "big",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": 4097,
+          "charset": 63,
+          "max_size": 67
+        },
+        "decimals": 30
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "typed",
+        "org_table": "typed",
+        "name": "small",
+        "org_name": "small",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": 4097,
+          "charset": 63,
+          "max_size": 12
+        },
+        "decimals": 2
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "typed",
+        "org_table": "typed",
+        "name": "ubin: Uuid",
+        "org_name": "ubin",
+        "type_info": {
+          "type": "String",
+          "flags": 128,
+          "charset": 63,
+          "max_size": 16
+        },
+        "decimals": 0
+      }
+    ],
+    "params": []
+  }
+}

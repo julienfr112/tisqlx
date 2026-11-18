@@ -1,0 +1,5 @@
+error: expected 2 bind argument(s) for this query, got 1
+ --> tests/ui-query/bind_count.rs:2:28
+  |
+2 |     let _ = tisqlx::query!("SELECT id FROM users WHERE id = ? AND name = ?", 1);
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

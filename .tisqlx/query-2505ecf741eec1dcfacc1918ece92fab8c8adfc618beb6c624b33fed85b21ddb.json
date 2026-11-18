@@ -1,0 +1,26 @@
+{
+  "query": "INSERT INTO users (name, email, score) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  }
+}

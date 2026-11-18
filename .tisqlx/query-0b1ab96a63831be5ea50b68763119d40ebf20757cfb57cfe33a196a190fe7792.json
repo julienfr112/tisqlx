@@ -1,0 +1,99 @@
+{
+  "query": "SELECT id, name, email, status, score, created_at FROM users WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "id",
+        "org_name": "id",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 4099,
+          "charset": 63,
+          "max_size": 20
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "name",
+        "org_name": "name",
+        "type_info": {
+          "type": "VarString",
+          "flags": 4097,
+          "charset": 46,
+          "max_size": 256
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "email",
+        "org_name": "email",
+        "type_info": {
+          "type": "VarString",
+          "flags": 0,
+          "charset": 46,
+          "max_size": 1020
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "status",
+        "org_name": "status",
+        "type_info": {
+          "type": "String",
+          "flags": 257,
+          "charset": 46,
+          "max_size": 24
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "score",
+        "org_name": "score",
+        "type_info": {
+          "type": "NewDecimal",
+          "flags": 1,
+          "charset": 63,
+          "max_size": 12
+        },
+        "decimals": 2
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "created_at",
+        "org_name": "created_at",
+        "type_info": {
+          "type": "Datetime",
+          "flags": 129,
+          "charset": 63,
+          "max_size": 26
+        },
+        "decimals": 6
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  }
+}

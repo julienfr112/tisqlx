@@ -1,0 +1,43 @@
+{
+  "query": "SELECT u.name, p.title FROM users u LEFT JOIN posts p ON p.user_id = u.id WHERE u.id = ?",
+  "describe": {
+    "columns": [
+      {
+        "schema": "tisqlx_macros",
+        "table": "u",
+        "org_table": "users",
+        "name": "name",
+        "org_name": "name",
+        "type_info": {
+          "type": "VarString",
+          "flags": 4097,
+          "charset": 46,
+          "max_size": 256
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "p",
+        "org_table": "posts",
+        "name": "title",
+        "org_name": "title",
+        "type_info": {
+          "type": "VarString",
+          "flags": 4096,
+          "charset": 46,
+          "max_size": 800
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  }
+}

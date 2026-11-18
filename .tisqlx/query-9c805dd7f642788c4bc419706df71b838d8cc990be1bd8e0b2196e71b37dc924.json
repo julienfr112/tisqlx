@@ -1,0 +1,43 @@
+{
+  "query": "SELECT MAX(id) AS `max_id!`, status AS `status: Status` FROM users WHERE id = ? GROUP BY status",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "max_id!",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 4098,
+          "charset": 63,
+          "max_size": 20
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "status: Status",
+        "org_name": "status",
+        "type_info": {
+          "type": "String",
+          "flags": 257,
+          "charset": 46,
+          "max_size": 24
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+error: #[tisqlx::test] functions must be async
+ --> tests/ui/test_attr_errors.rs:2:1
+  |
+2 | fn not_async() {}
+  | ^^
+
+error: unknown argument; expected `migrations = "dir"`
+ --> tests/ui/test_attr_errors.rs:4:16
+  |
+4 | #[tisqlx::test(fixtures = "x")]
+  |                ^^^^^^^^
+
+error: #[tisqlx::test] functions take no argument or one `tisqlx::Pool`
+ --> tests/ui/test_attr_errors.rs:8:24
+  |
+8 | async fn two_arguments(a: tisqlx::Pool, b: tisqlx::Pool) {}
+  |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

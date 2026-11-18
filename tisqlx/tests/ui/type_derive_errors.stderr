@@ -1,0 +1,23 @@
+error: Type can only be derived for a newtype (one field) or a fieldless enum
+ --> tests/ui/type_derive_errors.rs:2:1
+  |
+2 | struct Two(i32, i32);
+  | ^^^^^^^^^^^^^^^^^^^^^
+
+error: Type enums must be fieldless
+ --> tests/ui/type_derive_errors.rs:6:5
+  |
+6 |     A(i32),
+  |     ^^^^^^
+
+error: unknown tisqlx variant attribute (expected `rename`)
+  --> tests/ui/type_derive_errors.rs:11:14
+   |
+11 |     #[tisqlx(skip)]
+   |              ^^^^
+
+error: unknown tisqlx container attribute
+  --> tests/ui/type_derive_errors.rs:16:10
+   |
+16 | #[tisqlx(transparent)]
+   |          ^^^^^^^^^^^

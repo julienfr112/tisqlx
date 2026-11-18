@@ -1,0 +1,6 @@
+error: unsupported combination of #[tisqlx(...)] attributes: use at most one of skip, flatten, try_from, json, and `default` only alone or with json
+ --> tests/ui/from_row_bad_attrs.rs:3:5
+  |
+3 | /     #[tisqlx(json, try_from = "i64")]
+4 | |     a: u8,
+  | |_________^
