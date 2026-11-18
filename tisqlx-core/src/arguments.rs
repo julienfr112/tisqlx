@@ -52,6 +52,20 @@ impl Arguments {
         self.types.is_empty()
     }
 
+    /// Append `other`'s values after these (e.g. one row of a multi-row INSERT).
+    pub(crate) fn append(&mut self, other: &Arguments) {
+        let shift = self.values.len();
+        self.instants.extend(other.instants.iter().map(|at| at + shift));
+        self.types.extend_from_slice(&other.types);
+        self.nulls.extend_from_slice(&other.nulls);
+        self.values.extend_from_slice(&other.values);
+    }
+
+    /// Size of these values in a COM_STMT_EXECUTE packet (NULL bitmap, types, values).
+    pub(crate) fn wire_len(&self) -> usize {
+        self.types.len().div_ceil(8) + 1 + 2 * self.types.len() + self.values.len()
+    }
+
     pub(crate) fn null_bitmap(&self) -> Vec<u8> {
         let mut bitmap = vec![0u8; self.nulls.len().div_ceil(8)];
         for (i, &null) in self.nulls.iter().enumerate() {

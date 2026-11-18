@@ -18,6 +18,8 @@ nothing else.
 - A connection pool that spreads over several TiDB servers and skips failed ones, nested
   transactions via savepoints, and a prepared-statement cache that
   survives DDL (also DDL run on another TiDB node).
+- `BulkInsert`: stream rows into multi-row `INSERT`s sized to TiDB's packet and transaction
+  limits. With `IGNORE`, `REPLACE` or `ON DUPLICATE KEY UPDATE`.
 - `Acquire`: write a function once and call it with `&pool`, `&mut conn` or `&mut tx`. Its
   `begin()` is a transaction, or a savepoint inside a transaction.
 - `#[tisqlx::test]`: async tests that each get a throwaway database, with migrations and fixtures
@@ -92,6 +94,26 @@ hosts without a port use 4000) or with `ConnectOptions::hosts`.
   server fills up again as connections are replaced or added.
 - **Monitoring:** `Pool::host_connections()` shows the spread, and `server_addr()` on a
   connection says where it landed.
+
+**Bulk inserts.** One row per `INSERT` is the slowest way to load TiDB. `BulkInsert` batches
+rows into multi-row prepared statements. Measured with 10 connections: about 20× more rows per
+second than row by row, on the local playground cluster (209 000 vs 10 200 rows/s).
+
+```rust
+use tisqlx::BulkInsert;
+
+// All at once, or streamed with `start()` / `push()` / `finish()`:
+let rows = users.iter().map(|u| (&u.name, &u.email));
+BulkInsert::new("users", &["name", "email"]).execute(&pool, rows).await?;
+```
+
+- **Batch size:** up to 1000 rows, and within the byte budget read from the server
+  (`max_allowed_packet`, and a quarter of `txn-total-size-limit`). Full batches reuse one
+  prepared statement.
+- **Failures outside a transaction:** each batch commits on its own. When one fails,
+  `rows_written()` says how many rows the earlier batches committed, and the writer stops.
+- **Inside a transaction** (`execute(&mut tx, …)`): the load is all or nothing, but it must then
+  fit TiDB's transaction size limit.
 
 **Pool checkouts** ping a connection only if it sat idle for at least `ping_after_idle`
 (default 30 s). A connection used moments ago is handed out as is. If the server dropped it

@@ -64,8 +64,6 @@ it is tested.
 
 ## Ideas (TiDB-specific)
 
-- `bulk_insert`: batch rows into multi-row `INSERT`s sized to `max_allowed_packet` and TiDB's
-  transaction limits.
 - Large-table scans in primary-key or `_tidb_rowid` ranges, and wrappers for `BATCH ON … LIMIT`.
 - Query tagging (`tidb_session_alias` or comments) for TiDB Dashboard and statement summaries.
 - A replica-read pool (`tidb_replica_read`) for stale and read-only traffic.
@@ -188,6 +186,19 @@ longer; 1M iterations are clean. It found and fixed:
 7.5-specific test workarounds were removed. Test: mock `tidb_older_than_the_minimum_is_rejected`.
 
 **Features**
+- **`BulkInsert`:** a streaming writer of multi-row prepared `INSERT`s.
+  - Batches are capped at 1000 rows (or 65 535 parameters) and by a byte budget from
+    `max_allowed_packet` and `txn-total-size-limit`. `SHOW CONFIG` falls back to the 100 MB
+    default when it isn't allowed.
+  - Supports `IGNORE`, `REPLACE` and `ON DUPLICATE KEY UPDATE`.
+  - Bad rows are rejected at `push`. After a failed batch, `rows_written()` is still readable
+    and the writer stops.
+  - Speed: about 20× the row-by-row insert (`make bench`, workload `bulk`).
+  - Tests:
+    - unit: statement building, and the time-zone offsets of appended rows;
+    - live: batching by rows and by bytes; `DateTime<Utc>` and NULLs in a Paris session,
+      checked to fail without the offset shift; the three conflict modes; a failed second
+      batch; all or nothing inside a transaction.
 - **Several TiDB servers per pool:** `tidb://u@a,b,c/db` or `ConnectOptions::hosts`.
   - Least connections first, with backoff for servers that fail to connect.
   - Each attempt gets a share of the connect timeout, and only network errors fail over.

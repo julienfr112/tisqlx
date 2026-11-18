@@ -9,7 +9,10 @@
 //! Workloads (`--workload`, default `all`):
 //! - `select`: `SELECT v, n FROM bench WHERE id = ?`, a random row of 10 000;
 //! - `insert`: `INSERT INTO bench_w (v, n) VALUES (?, ?)`;
-//! - `txn`: `BEGIN; SELECT ... FOR UPDATE; UPDATE ...; COMMIT` on a random row (4 statements).
+//! - `txn`: `BEGIN; SELECT ... FOR UPDATE; UPDATE ...; COMMIT` on a random row (4 statements);
+//! - `bulk`: 1000 rows into `bench_w` per request, with `BulkInsert` (one statement).
+//!
+//! The `rows/s` column counts rows written (or read) per second.
 //!
 //! It uses the database `tisqlx_bench` (recreated). Never point it at a shared server.
 
@@ -18,7 +21,7 @@
 
 use std::time::{Duration, Instant};
 
-use tisqlx_core::{ConnectOptions, Pool, PoolOptions, TiConnection, query, query_as};
+use tisqlx_core::{BulkInsert, ConnectOptions, Pool, PoolOptions, TiConnection, query, query_as};
 
 const ROWS: i64 = 10_000;
 
@@ -58,6 +61,14 @@ enum Workload {
     Select,
     Insert,
     Txn,
+    Bulk,
+}
+
+const BULK_ROWS: i64 = 1000;
+
+/// Rows per request of a workload.
+fn rows_per_request(w: Workload) -> u64 {
+    if matches!(w, Workload::Bulk) { BULK_ROWS as u64 } else { 1 }
 }
 
 async fn one(pool: &Pool, w: Workload, rng: &mut u64) -> tisqlx_core::Result<()> {
@@ -76,6 +87,10 @@ async fn one(pool: &Pool, w: Workload, rng: &mut u64) -> tisqlx_core::Result<()>
                 query_as("SELECT n FROM bench WHERE id = ? FOR UPDATE").bind(id).fetch_one(&mut *tx).await?;
             query("UPDATE bench SET n = ? WHERE id = ?").bind(n + 1).bind(id).execute(&mut *tx).await?;
             tx.commit().await?;
+        }
+        Workload::Bulk => {
+            let rows = (0..BULK_ROWS).map(|i| ("payload-0123456789", id + i));
+            BulkInsert::new("bench_w", &["v", "n"]).max_rows(BULK_ROWS as usize).execute(pool, rows).await?;
         }
     }
     Ok(())
@@ -161,13 +176,16 @@ async fn main() {
         .connect_with(opts)
         .await
         .unwrap();
-    let server = pool.acquire().await.unwrap().server_version().to_owned();
-    println!("server {server}, {} connections, {} s per workload, {} rows", a.connections, a.seconds, ROWS);
+    // The handshake's version string starts with the MySQL version TiDB is compatible with
+    // (`8.0.11-TiDB-v8.5.8`): print TiDB's own.
+    let tidb = pool.acquire().await.unwrap().tidb_version().map_or("unknown".into(), |v| v.to_string());
+    println!("TiDB {tidb}, {} connections, {} s per workload, {} rows", a.connections, a.seconds, ROWS);
     println!(
-        "{:<8} {:>10} {:>10} {:>8} {:>9} {:>9} {:>9}",
-        "workload", "requests", "req/s", "errors", "p50", "p99", "max"
+        "{:<8} {:>10} {:>10} {:>10} {:>8} {:>9} {:>9} {:>9}",
+        "workload", "requests", "req/s", "rows/s", "errors", "p50", "p99", "max"
     );
-    let all = [("select", Workload::Select), ("insert", Workload::Insert), ("txn", Workload::Txn)];
+    let all =
+        [("select", Workload::Select), ("insert", Workload::Insert), ("txn", Workload::Txn), ("bulk", Workload::Bulk)];
     for (name, w) in all.into_iter().filter(|(n, _)| a.workload == "all" || a.workload == *n) {
         // Warm up: prepared statements cached on every connection.
         run(&pool, w, a.connections, 1).await;
@@ -176,9 +194,10 @@ async fn main() {
         let rate = o.done as f64 / elapsed.as_secs_f64();
         let ms = |d: Duration| format!("{:.2}ms", d.as_secs_f64() * 1000.0);
         println!(
-            "{name:<8} {:>10} {:>10.0} {:>8} {:>9} {:>9} {:>9}",
+            "{name:<8} {:>10} {:>10.0} {:>10.0} {:>8} {:>9} {:>9} {:>9}",
             o.done,
             rate,
+            rate * rows_per_request(w) as f64,
             o.errors,
             ms(percentile(&o.latencies, 0.50)),
             ms(percentile(&o.latencies, 0.99)),

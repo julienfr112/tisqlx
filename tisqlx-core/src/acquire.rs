@@ -23,6 +23,11 @@ use crate::transaction::Transaction;
 ///     tx.commit().await
 /// }
 /// ```
+///
+/// In a spawned task (`tokio::spawn`), such an `async fn` may fail to compile with "implementation
+/// of `Acquire` is not general enough": the compiler cannot prove its future `Send` for every
+/// lifetime. Return a boxed future instead (`-> BoxFuture<'c, Result<T>>` with `Box::pin(async
+/// move { ... })`, and `A: Acquire<'c> + 'c`), as [`BulkInsert::execute`](crate::BulkInsert::execute) does.
 pub trait Acquire<'c>: Send {
     /// The connection [`acquire`](Acquire::acquire) returns: a [`PoolConnection`] from a pool,
     /// else the connection itself (inside a transaction, its connection, still in the transaction).

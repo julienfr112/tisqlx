@@ -292,11 +292,15 @@ impl PoolInner {
         let (mut raw, server) = if self.connect_options.socket.is_some() {
             (TiConnection::connect_with(&self.connect_options).await?, None)
         } else {
-            let plan = self.balancer.plan(self.targets().await);
-            let (raw, i) =
-                TiConnection::connect_any(&self.connect_options, &plan, |i, ok| self.balancer.report(&plan[i], ok))
-                    .await?;
-            (raw, Some(self.balancer.slot(&plan[i])))
+            // `connect_timeout` bounds the whole open, name resolution included.
+            let o = &self.connect_options;
+            tokio::time::timeout(o.connect_timeout, async {
+                let plan = self.balancer.plan(self.targets().await);
+                let (raw, i) = TiConnection::connect_any(o, &plan, |i, ok| self.balancer.report(&plan[i], ok)).await?;
+                Ok::<_, Error>((raw, Some(self.balancer.slot(&plan[i]))))
+            })
+            .await
+            .map_err(|_| Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect timed out")))??
         };
         if let Some(hook) = &self.options.after_connect {
             hook(&mut raw).await?;

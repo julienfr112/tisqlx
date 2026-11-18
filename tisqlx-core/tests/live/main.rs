@@ -2,6 +2,8 @@
 
 mod common;
 
+#[cfg(feature = "chrono")]
+mod bulk;
 mod cluster;
 mod connection;
 mod migrate;

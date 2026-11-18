@@ -8,6 +8,7 @@ pub mod arguments;
 mod balance;
 #[doc(hidden)]
 pub mod bind_check;
+pub mod bulk;
 pub mod connection;
 pub mod decode;
 pub mod encode;
@@ -34,6 +35,7 @@ pub mod util;
 
 pub use acquire::Acquire;
 pub use arguments::Arguments;
+pub use bulk::{BulkInsert, BulkRow, BulkWriter};
 pub use connection::{Describe, QueryResult, Step, TiConnection};
 pub use decode::Decode;
 pub use encode::{Encode, IsNull};
