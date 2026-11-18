@@ -24,8 +24,8 @@ it is tested.
   implicit commit (DDL) or a raw `ROLLBACK`, only nested levels report it. The top-level
   `COMMIT` has nothing left to commit, and returns `Ok`.
 - [ ] **P3: A database change the driver can't see leaves cached statements on the old
-  database.** Only a statement that starts with `USE` empties the statement cache. A `USE`
-  after a `--` or `#` comment, for example, is not seen.
+  database.** Only a statement that starts with `USE` (after any comments) empties the statement cache.
+  A `USE` run by a stored procedure or an executable comment, for example, is not seen.
   *Workaround:* `TiConnection::clear_cached_statements()`.
 
 ## Macros and offline data
@@ -130,6 +130,13 @@ were fixed by inspection only.
   `a_cancelled_batch_fails_the_writer`, `configuration_errors`.
 - **Migration bookkeeping is committed when autocommit is off:** live
   `bookkeeping_is_committed_when_autocommit_is_off`.
+- **A failed migration's open transaction is rolled back,** so a later `repair` can't commit
+  the half-done migration: live `failed_migration_does_not_leave_its_transaction_open`.
+- **`fetch_one` and `fetch_optional` read the whole response,** so the connection goes straight
+  back to the pool instead of through a background reset: live
+  `sequential_fetch_one_keeps_using_one_connection`.
+- **A huge `connect_timeout` means no timeout** instead of a panic: mock
+  `huge_connect_timeout_means_no_timeout`.
 - **`min_connections` is capped at `max_connections`.** The maintenance task used to open
   connections above the maximum: live `maintenance_never_opens_more_than_max_connections`.
 - **Nested transactions inside a stale read are no-ops.** TiDB accepts `SAVEPOINT` there but
