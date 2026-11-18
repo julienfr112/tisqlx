@@ -83,11 +83,13 @@ impl PoolOptions {
         self
     }
 
+    /// Close connections idle for this long (default 10 min), down to `min_connections`.
     pub fn idle_timeout(mut self, d: Option<Duration>) -> Self {
         self.idle_timeout = d;
         self
     }
 
+    /// Close connections this long after they were opened (default 30 min), once returned.
     pub fn max_lifetime(mut self, d: Option<Duration>) -> Self {
         self.max_lifetime = d;
         self
@@ -209,13 +211,20 @@ async fn maintain(pool: std::sync::Weak<PoolInner>, period: Duration) {
         }
         let expired: Vec<Idle> = {
             let mut idle = inner.idle.lock().unwrap();
-            let (keep, expired): (Vec<Idle>, Vec<Idle>) =
-                idle.drain(..).partition(|i| !inner.is_idle_expired(i) && !inner.is_expired(&i.live));
+            // Oldest first; `idle_timeout` only retires connections above `min_connections`.
+            let mut surplus = inner.size.load(Ordering::Acquire).saturating_sub(inner.options.min_connections);
+            let (expired, keep): (Vec<Idle>, Vec<Idle>) = idle.drain(..).partition(|i| {
+                let retire = inner.is_expired(&i.live) || (surplus > 0 && inner.is_idle_expired(i));
+                if retire {
+                    surplus = surplus.saturating_sub(1);
+                }
+                retire
+            });
             idle.extend(keep);
             expired
         };
         for Idle { live, .. } in expired {
-            let Live { raw, .. } = live; // frees the slot before closing
+            let Live { raw, .. } = live;
             let _ = tokio::time::timeout(inner.io_timeout(), raw.close()).await;
         }
         while inner.size.load(Ordering::Acquire) < inner.options.min_connections {
@@ -367,8 +376,8 @@ impl Pool {
         self.0.idle.lock().unwrap().len()
     }
 
-    /// Open connections per TiDB server (`host:port`, plus the address with
-    /// `load_balance_dns`), for servers this pool has connected to or tried.
+    /// Open connections per TiDB server (`host:port`, plus the address with `load_balance_dns`):
+    /// the servers the pool last chose from, and any other that still has connections.
     pub fn host_connections(&self) -> Vec<(String, u32)> {
         self.0.balancer.counts()
     }
@@ -395,7 +404,9 @@ impl Pool {
             // enough for `idle_timeout` to retire them.
             let idle = inner.idle.lock().unwrap().pop_back();
             let Some(idle) = idle else { break };
-            let expired = inner.is_idle_expired(&idle) || inner.is_expired(&idle.live);
+            // As in `maintain`, `idle_timeout` does not take the pool below `min_connections`.
+            let surplus = inner.size.load(Ordering::Acquire) > inner.options.min_connections;
+            let expired = inner.is_expired(&idle.live) || (surplus && inner.is_idle_expired(&idle));
             let ping = inner.options.test_before_acquire && idle.since.elapsed() >= inner.options.ping_after_idle;
             let mut live = idle.live;
             if expired {

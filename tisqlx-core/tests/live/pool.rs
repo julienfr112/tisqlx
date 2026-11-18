@@ -168,7 +168,7 @@ async fn maintenance_reaps_idle_connections_and_keeps_the_minimum() {
     let conns: Vec<_> = futures_util::future::try_join_all((0..4).map(|_| pool.acquire())).await.unwrap();
     assert_eq!(pool.size(), 4);
     drop(conns);
-    // idle past the timeout: retired, then reopened up to min_connections
+    // idle past the timeout: the two above min_connections are retired
     let mut size = 0;
     for _ in 0..40 {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -183,6 +183,39 @@ async fn maintenance_reaps_idle_connections_and_keeps_the_minimum() {
     drop(lost);
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert_eq!(pool.size(), 2);
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn idle_timeout_keeps_the_minimum_connections_open() {
+    require_db!();
+    let opts = fresh_db("poolidlemin").await;
+    let opened = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let counter = opened.clone();
+    let pool = PoolOptions::new()
+        .max_connections(4)
+        .min_connections(2)
+        .idle_timeout(Some(Duration::from_millis(100))) // maintenance every 50 ms
+        .after_connect(move |_| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async { Ok(()) })
+        })
+        .connect_with(opts)
+        .await
+        .unwrap();
+    let conns: Vec<_> = futures_util::future::try_join_all((0..4).map(|_| pool.acquire())).await.unwrap();
+    let ids: Vec<u32> = conns.iter().map(|c| c.connection_id()).collect();
+    drop(conns);
+    let opened = || opened.load(std::sync::atomic::Ordering::Relaxed);
+    let before = opened();
+    // Many idle timeouts later: the surplus is gone, and the other two were never reopened.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!((pool.size(), pool.num_idle()), (2, 2));
+    assert_eq!(opened(), before, "no connection was opened meanwhile");
+    // `acquire` hands them out rather than closing them as idle-expired.
+    let (a, b) = (pool.acquire().await.unwrap(), pool.acquire().await.unwrap());
+    assert!(ids.contains(&a.connection_id()) && ids.contains(&b.connection_id()));
+    assert_eq!(opened(), before);
 }
 
 #[tokio::test]
