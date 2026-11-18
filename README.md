@@ -76,7 +76,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 | `ssl-mode` | `preferred` | `disabled`, `preferred`, `required`, `verify-ca` or `verify-identity` |
 | `ssl-ca` | webpki roots | PEM file of CA certificates for the two `verify-*` modes |
 | `socket` | | path of a Unix socket to use instead of TCP |
-| `connect-timeout` | `30` | seconds |
+| `connect-timeout` | `30` | seconds, at least 1 |
 | `timezone` | `+00:00` | session `time_zone`; `server` keeps the server's (see *Time zones* below) |
 | `txn-mode` | server's | `pessimistic` or `optimistic` |
 | `resource-group` | | TiDB resource group of the session |
@@ -85,7 +85,8 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 | `load-balance-dns` | `false` | see below |
 
 Any other key is set as a session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
-Values are percent-decoded, and `+` is a literal plus (`timezone=+08:00`).
+Values are percent-decoded (they must be valid UTF-8), and `+` is a literal plus
+(`timezone=+08:00`).
 
 **Several TiDB servers.** List them in the URL (`tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`;
 hosts without a port use 4000) or with `ConnectOptions::hosts`.
@@ -95,8 +96,8 @@ hosts without a port use 4000) or with `ConnectOptions::hosts`.
   to 30 s.
 - **Timeouts:** each attempt gets its share of `connect-timeout`, so an unresponsive server
   can't use it all up.
-- **No failover on other errors:** only network errors move on to the next server; a wrong
-  password fails at once.
+- **No failover on other errors:** only network errors and a server at its connection limit
+  (error 1040) move on to the next server; a wrong password fails at once.
 - **Single connections:** `TiConnection::connect` tries the servers in order.
 - **One DNS name with several addresses** (e.g. a Kubernetes headless service): add
   `load-balance-dns=true` to balance over its addresses.
@@ -132,6 +133,12 @@ BulkInsert::new("users", &["name", "email"]).execute(&pool, rows).await?;
 in the meantime (a restart or a `KILL`), that one query fails and the pool discards the
 connection. `PoolOptions::ping_after_idle(Duration::ZERO)` pings on every checkout, and
 `test_before_acquire(false)` never pings.
+
+**`rows_affected()`** counts the rows a statement matched, not the rows it changed (tisqlx sets
+`CLIENT_FOUND_ROWS`), so an `UPDATE` that leaves a row as it was still counts it.
+
+**DDL inside a transaction** commits it, as always in TiDB. A nested `commit()` or
+`rollback()` after it fails with an error that says so, and so does the outer `commit()`.
 
 ## Query macros
 

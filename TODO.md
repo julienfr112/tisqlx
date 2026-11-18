@@ -85,6 +85,17 @@ were fixed by inspection only.
   `migration_lock_is_released_when_release_lock_fails`).
 - **Unknown column types read as strings** instead of breaking prepared queries: mock
   `unknown_column_type_is_read_as_a_string`.
+- **Cached statements follow the current database.** TiDB binds a prepared statement to the
+  database current when it was prepared, so a statement starting with `USE` empties the cache:
+  live `cached_statement_follows_the_current_database`. A database change the driver can't see
+  in the SQL (e.g. inside a stored `PREPARE`) is not covered.
+- **A database name with a backtick connects.** TiDB builds its own `USE` from the handshake
+  without escaping, so the driver selects such a database itself: live
+  `database_name_with_a_backtick`.
+- **An implicit commit (DDL) is reported at nested levels** instead of error 1305: live
+  `ddl_inside_a_nested_transaction`.
+- **`clear_cached_statements` closes the statements at once:** mock
+  `clearing_the_statement_cache_closes_the_statements_at_once`.
 - **A failed `ROLLBACK TO SAVEPOINT` rolls back the whole transaction,** and the outer
   `commit()` then fails: mock `failed_savepoint_rollback_aborts_the_whole_transaction`.
 - **A retried transaction rolls back before the next attempt:** mock
@@ -166,7 +177,8 @@ were fixed by inspection only.
   `SHOW CONFIG` falls back to the 100 MB default of `txn-total-size-limit` when it isn't allowed.
 - **Several TiDB servers per pool:** unit `balance::tests` and URL parsing; mock (spread over two
   servers, a dead one skipped, an unresponsive one only costs its share of the timeout, a
-  connection lost during the TLS handshake fails over, a wrong password doesn't); live (a dead host in the list, `localhost` with and without DNS
+  connection lost during the TLS handshake and a full server (1040) fail over, a wrong
+  password doesn't); live (a dead host in the list, `localhost` with and without DNS
   balancing); cluster (both TiDB nodes get connections).
 - **`Acquire`:** live `acquire_accepts_pools_connections_and_transactions`.
 - **`#[tisqlx::test]`, with migrations and fixtures:** `tisqlx/tests/test_attr.rs`, and
