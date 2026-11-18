@@ -1,14 +1,23 @@
-# Single entry point for local development and CI.
+# Single entry point for local development and CI. `make help` prints this list.
 #
 #   make db-up          start the dedicated test TiDB (v8.5.8, port 4100, TLS + socket)
-#   make test           unit + live tests (starts nothing; run db-up first)
-#   make ci             everything CI runs
+#   make db-down        stop it
+#   make test           unit + live tests (starts nothing; run db-up first); same as test-live
+#   make test-unit      the tests that need no database
+#   make lint           rustfmt --check and clippy -D warnings (make fmt reformats)
+#   make features       check every supported feature set of the facade
+#   make prepare        regenerate the offline query data (.tisqlx/); prepare-check verifies it
+#   make ci             lint, features, test-live, prepare-check
+#   make msrv           check on Rust 1.88
+#   make audit          RustSec advisories (needs cargo-audit)
+#   make coverage       HTML coverage report over the live tier (needs cargo-llvm-cov)
 #   make db-cluster     start the cluster tier (tiup playground: 2 TiDB, PD, TiKV, TiFlash)
-#   make test-cluster   tests that need the real cluster
+#   make test-cluster   tests that need the real cluster; db-cluster-down stops it
 #   make bench          throughput against the test DB (10 connections, 10 s per workload)
 #   make bench-cluster  the same on a production-shaped playground (1 TiDB, 3 TiKV), started and stopped
 #
 # Tests never use a shared server: TISQLX_TEST_URL points at the dedicated instance.
+# `make db-up TIDB_PORT=4200` (and the same TIDB_PORT on the test targets) uses another port.
 
 TIDB_PORT   ?= 4100
 TEST_URL    ?= tidb://root@127.0.0.1:$(TIDB_PORT)
@@ -18,8 +27,12 @@ MSRV        := 1.88
 CLI         := cargo run -q -p tisqlx-cli --
 
 # Live tier: tests run against the test DB, and the query macros are checked online too.
-LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET=$(TEST_SOCKET) TISQLX_TEST_REQUIRE=1 \
+LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET="$(TEST_SOCKET)" TISQLX_TEST_REQUIRE=1 \
 	DATABASE_URL=$(MACROS_URL) TISQLX_OFFLINE=false
+
+# The workspace run builds the macros with every feature, so chrono and Decimal win. This
+# checks the type mapping they fall back to without them.
+TEST_MACROS_FALLBACK := cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
 
 .PHONY: help bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
 
@@ -48,19 +61,17 @@ fmt:
 
 lint:
 	cargo fmt --all --check
-	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # No database needed: live tests skip, macros compile from .tisqlx/.
 test-unit:
 	cargo test --workspace --all-features
-	cargo test -q -p tisqlx-macros --all-features --lib
-	cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
+	$(TEST_MACROS_FALLBACK)
 
 # Unit + live tests (the `#[ignore]`d ones need the database); fails if it is unreachable.
 test-live test: macros-db
 	$(LIVE_ENV) cargo test --workspace --all-features -- --include-ignored --skip cluster::
-	cargo test -q -p tisqlx-macros --all-features --lib
-	cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
+	$(TEST_MACROS_FALLBACK)
 
 # Schema the query macros are checked against.
 macros-db:

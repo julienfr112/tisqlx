@@ -17,7 +17,9 @@ set -euo pipefail
 
 TIDB_VERSION="${TIDB_VERSION:-v8.5.8}"
 TIDB_PORT="${TIDB_PORT:-4100}"
-TIDB_STATUS_PORT="${TIDB_STATUS_PORT:-10180}"
+# Follows TIDB_PORT (4100 -> 10180), so two instances on different ports don't mistake each
+# other for "already running".
+TIDB_STATUS_PORT="${TIDB_STATUS_PORT:-$((TIDB_PORT + 6080))}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATE="${TIDB_STATE_DIR:-$ROOT/target/tidb}"
 SOCKET="$STATE/tidb.sock"
@@ -148,10 +150,9 @@ case "${1:-}" in
   down) down ;;
   status) curl -sf "http://127.0.0.1:$TIDB_STATUS_PORT/status" && echo ;;
   url) url ;;
-  socket) echo "$SOCKET" ;;
   cluster-up) cluster_up ;;
   cluster-down) cluster_down ;;
   cluster-urls) cluster_urls ;;
   cluster-url) cluster_url ;;
-  *) echo "usage: $0 up|down|status|url|socket|cluster-up|cluster-down|cluster-urls|cluster-url" >&2; exit 2 ;;
+  *) echo "usage: $0 up|down|status|url|cluster-up|cluster-down|cluster-urls|cluster-url" >&2; exit 2 ;;
 esac
