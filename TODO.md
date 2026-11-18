@@ -93,7 +93,16 @@ were fixed by inspection only.
   close): mock `hung_reset_is_abandoned_and_frees_its_slot`.
 - **`idle_timeout` and `min_connections` are enforced,** and idle connections are reused most
   recent first: live `maintenance_reaps_idle_connections_and_keeps_the_minimum`,
-  `idle_connections_are_reused_most_recent_first`.
+  `idle_connections_are_reused_most_recent_first`. `idle_timeout` only retires connections
+  above `min_connections` (it used to close and reopen them every period): live
+  `idle_timeout_keeps_the_minimum_connections_open`.
+- **The balancer forgets servers that left the host list** (DNS) once they have no connection:
+  unit `servers_no_longer_listed_are_forgotten_once_empty`.
+- **A bulk insert whose batch was cancelled mid-send fails** instead of reporting success, and
+  `on_duplicate_key_update(&[])` is a configuration error: live
+  `a_cancelled_batch_fails_the_writer`, `configuration_errors`.
+- **Migration bookkeeping is committed when autocommit is off:** live
+  `bookkeeping_is_committed_when_autocommit_is_off`.
 - **`min_connections` is capped at `max_connections`.** The maintenance task used to open
   connections above the maximum: live `maintenance_never_opens_more_than_max_connections`.
 - **Nested transactions inside a stale read are no-ops.** TiDB accepts `SAVEPOINT` there but

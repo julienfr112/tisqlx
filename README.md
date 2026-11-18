@@ -122,6 +122,8 @@ BulkInsert::new("users", &["name", "email"]).execute(&pool, rows).await?;
   prepared statement.
 - **Failures outside a transaction:** each batch commits on its own. When one fails,
   `rows_written()` says how many rows the earlier batches committed, and the writer stops.
+  A `push` cancelled while its batch is being sent stops it too: `finish()` then returns an
+  error.
 - **Inside a transaction** (`execute(&mut tx, …)`): the load is all or nothing, but it must then
   fit TiDB's transaction size limit.
 
