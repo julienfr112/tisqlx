@@ -64,6 +64,7 @@ After changing a `query!` call or the test schema (`tisqlx/tests/migrations`), r
 | `make audit` | RustSec advisories |
 | `make coverage` | `cargo llvm-cov` HTML report over the live tier (about 81% of lines) |
 | `make ci` | lint + features + test-live + prepare-check |
+| `make bench` | throughput against the test DB: point selects, inserts and transactions, 10 connections at full speed for 10 s each (`tisqlx-core/examples/bench.rs`). `BENCH_ARGS="--connections 50 --workload select"` changes it. It measures the driver against the standalone `unistore` server, not a real TiKV cluster. |
 
 ## CI
 

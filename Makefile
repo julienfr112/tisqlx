@@ -5,6 +5,7 @@
 #   make ci             everything CI runs
 #   make db-cluster     start the cluster tier (tiup playground: 2 TiDB, PD, TiKV, TiFlash)
 #   make test-cluster   tests that need the real cluster
+#   make bench          throughput against the test DB (10 connections, 10 s per workload)
 #
 # Tests never use a shared server: TISQLX_TEST_URL points at the dedicated instance.
 
@@ -19,7 +20,7 @@ CLI         := cargo run -q -p tisqlx-cli --
 LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET=$(TEST_SOCKET) TISQLX_TEST_REQUIRE=1 \
 	DATABASE_URL=$(MACROS_URL) TISQLX_OFFLINE=false
 
-.PHONY: help db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
+.PHONY: help bench db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
 
 help:
 	@sed -n 's/^#   \(make .*\)/\1/p' Makefile
@@ -83,6 +84,11 @@ features:
 
 msrv:
 	CARGO_TARGET_DIR=target/msrv cargo +$(MSRV) check -q --workspace --all-targets --all-features
+
+# Throughput (release build). Override e.g. `make bench BENCH_ARGS="--connections 50 --workload select"`.
+BENCH_ARGS ?=
+bench:
+	cargo run -q --release -p tisqlx-core --example bench -- --url $(TEST_URL) $(BENCH_ARGS)
 
 audit:
 	cargo audit
