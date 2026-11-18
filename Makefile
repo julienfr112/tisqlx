@@ -53,14 +53,14 @@ lint:
 # No database needed: live tests skip, macros compile from .tisqlx/.
 test-unit:
 	cargo test --workspace --all-features
-	cargo test -q -p tisqlx-macros-core --all-features --lib
-	cargo test -q -p tisqlx-macros-core --no-default-features --features time,bigdecimal --lib
+	cargo test -q -p tisqlx-macros --all-features --lib
+	cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
 
 # Unit + live tests (the `#[ignore]`d ones need the database); fails if it is unreachable.
 test-live test: macros-db
 	$(LIVE_ENV) cargo test --workspace --all-features -- --include-ignored --skip cluster::
-	cargo test -q -p tisqlx-macros-core --all-features --lib
-	cargo test -q -p tisqlx-macros-core --no-default-features --features time,bigdecimal --lib
+	cargo test -q -p tisqlx-macros --all-features --lib
+	cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
 
 # Schema the query macros are checked against.
 macros-db:

@@ -1,8 +1,18 @@
 //! Procedural macros for tisqlx. Use them through the `tisqlx` crate.
 
+use crate::query::{Kind, QueryInput, Source, expand};
 use proc_macro::TokenStream;
 use syn::parse::Parser;
-use tisqlx_macros_core::query::{Kind, QueryInput, Source, expand};
+
+// The macros' implementation, as plain functions over `proc_macro2` so it can be unit-tested.
+// A proc-macro crate exports only its macros, so these modules are private.
+mod derives;
+mod describe;
+mod migrate;
+mod params;
+mod query;
+mod rust_types;
+mod test_attr;
 
 fn run(input: TokenStream, kind: Kind, source: Source) -> TokenStream {
     let parsed = match QueryInput::parser(kind).parse(input) {
@@ -52,19 +62,19 @@ pub fn migrate(input: TokenStream) -> TokenStream {
             Err(e) => return e.to_compile_error().into(),
         }
     };
-    tisqlx_macros_core::migrate::expand(dir).unwrap_or_else(|e| e.to_compile_error()).into()
+    migrate::expand(dir).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 #[proc_macro_derive(FromRow, attributes(tisqlx))]
 pub fn derive_from_row(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    tisqlx_macros_core::derives::expand_derive_from_row(&input).unwrap_or_else(|e| e.to_compile_error()).into()
+    derives::expand_derive_from_row(&input).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 #[proc_macro_derive(Type, attributes(tisqlx))]
 pub fn derive_type(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as syn::DeriveInput);
-    tisqlx_macros_core::derives::expand_derive_type(&input).unwrap_or_else(|e| e.to_compile_error()).into()
+    derives::expand_derive_type(&input).unwrap_or_else(|e| e.to_compile_error()).into()
 }
 
 /// Run an async test against its own database, created on the server named by
@@ -82,5 +92,5 @@ pub fn test(args: TokenStream, input: TokenStream) -> TokenStream {
         Ok(i) => i,
         Err(e) => return e.to_compile_error().into(),
     };
-    tisqlx_macros_core::test_attr::expand(args.into(), item).unwrap_or_else(|e| e.to_compile_error()).into()
+    test_attr::expand(args.into(), item).unwrap_or_else(|e| e.to_compile_error()).into()
 }

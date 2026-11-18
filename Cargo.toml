@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["tisqlx-core", "tisqlx-macros-core", "tisqlx-macros", "tisqlx", "tisqlx-cli"]
+members = ["tisqlx-core", "tisqlx-macros", "tisqlx", "tisqlx-cli"]
 exclude = ["sqlx"]
 
 [workspace.package]
@@ -11,7 +11,6 @@ rust-version = "1.88"
 
 [workspace.dependencies]
 tisqlx-core = { path = "tisqlx-core", version = "0.1.0", default-features = false }
-tisqlx-macros-core = { path = "tisqlx-macros-core", version = "0.1.0" }
 tisqlx-macros = { path = "tisqlx-macros", version = "0.1.0" }
 tokio = { version = "1", features = ["net", "io-util", "rt", "sync", "time", "macros", "fs"] }
 futures-core = "0.3"

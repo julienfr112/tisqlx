@@ -1160,17 +1160,6 @@ dependencies = [
 name = "tisqlx-macros"
 version = "0.1.0"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "tisqlx-core",
- "tisqlx-macros-core",
-]
-
-[[package]]
-name = "tisqlx-macros-core"
-version = "0.1.0"
-dependencies = [
  "bigdecimal",
  "chrono",
  "dotenvy",

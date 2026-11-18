@@ -63,7 +63,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 |---|---|
 | `tisqlx` | facade: re-exports and macros. Features: `macros`, `chrono`, `decimal` (all default) |
 | `tisqlx-core` | driver: wire protocol, auth, TLS, types, pool, transactions, TiDB features, migrations |
-| `tisqlx-macros(-core)` | `query!` family, `migrate!`, `#[derive(FromRow, Type)]` |
+| `tisqlx-macros` | `query!` family, `migrate!`, `#[derive(FromRow, Type)]`, `#[tisqlx::test]` (proc-macro crate, used through `tisqlx`) |
 | `tisqlx-cli` | `tisqlx` binary: `database`, `migrate`, `prepare` |
 
 ## Connection URL

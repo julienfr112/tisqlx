@@ -19,7 +19,7 @@ it is tested.
 ## Macros and offline data
 
 - [ ] **P3: Check more bind positions.** Arguments are checked where the analyzer
-  (`tisqlx-macros-core/src/params.rs`) finds the column next to a `?`.
+  (`tisqlx-macros/src/params.rs`) finds the column next to a `?`.
   - Still unchecked: function arguments, subqueries, the select list, HAVING, UNION and CTEs,
     `INSERT` without a column list, and `INSERT … SELECT`.
   - A SQL parser (e.g. `sqlparser`) could cover more, at the cost of a large compile-time
