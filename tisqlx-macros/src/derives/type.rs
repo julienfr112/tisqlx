@@ -83,6 +83,9 @@ pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
             })
         }
         Data::Enum(e) => {
+            if !input.generics.params.is_empty() {
+                return Err(syn::Error::new_spanned(&input.generics, "Type cannot be derived for a generic enum"));
+            }
             let mut to_str = Vec::new();
             let mut from_str = Vec::new();
             for v in &e.variants {

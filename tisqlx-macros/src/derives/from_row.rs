@@ -32,15 +32,28 @@ pub fn expand_derive_from_row(input: &DeriveInput) -> syn::Result<TokenStream> {
         for (i, field) in fields.iter().enumerate() {
             let attrs = field_attrs(&field.attrs)?;
             let ty = &field.ty;
-            let column = match (&field.ident, &attrs.rename) {
-                (_, Some(r)) => r.clone(),
-                (Some(id), None) => {
+            if let Some(rename) = &attrs.rename
+                && (field.ident.is_none() || attrs.skip || attrs.flatten)
+            {
+                return Err(syn::Error::new_spanned(
+                    field,
+                    format!(
+                        "`rename = {rename:?}` has no effect here: tuple fields are read by position, and \
+                         `skip`/`flatten` fields read no column of their own"
+                    ),
+                ));
+            }
+            let index = match &field.ident {
+                Some(id) => {
                     let name = id.to_string().trim_start_matches("r#").to_owned();
-                    container.rename_all.map_or(name.clone(), |r| r.apply(&name))
+                    let column = attrs
+                        .rename
+                        .clone()
+                        .unwrap_or_else(|| container.rename_all.map_or(name.clone(), |r| r.apply(&name)));
+                    quote!(#column)
                 }
-                (None, None) => String::new(),
+                None => quote!(#i),
             };
-            let index = if field.ident.is_some() { quote!(#column) } else { quote!(#i) };
             let combined = [
                 ("skip", attrs.skip),
                 ("flatten", attrs.flatten),

@@ -21,3 +21,9 @@ error: unknown tisqlx container attribute
    |
 16 | #[tisqlx(transparent)]
    |          ^^^^^^^^^^^
+
+error: Type cannot be derived for a generic enum
+  --> tests/ui/type_derive_errors.rs:20:13
+   |
+20 | enum Generic<const N: usize> {
+   |             ^^^^^^^^^^^^^^^^

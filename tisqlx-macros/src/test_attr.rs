@@ -14,6 +14,9 @@ pub fn expand(args: TokenStream, item: ItemFn) -> syn::Result<TokenStream> {
     let mut fixtures: Vec<LitStr> = Vec::new();
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("migrations") {
+            if migrations.is_some() {
+                return Err(meta.error("`migrations` given twice: a test takes one migrations directory"));
+            }
             migrations = Some(meta.value()?.parse()?);
             Ok(())
         } else if meta.path.is_ident("fixtures") {

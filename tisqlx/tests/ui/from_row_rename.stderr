@@ -1,0 +1,19 @@
+error: `rename = "id"` has no effect here: tuple fields are read by position, and `skip`/`flatten` fields read no column of their own
+ --> tests/ui/from_row_rename.rs:2:14
+  |
+2 | struct Tuple(#[tisqlx(rename = "id")] i64);
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `rename = "x"` has no effect here: tuple fields are read by position, and `skip`/`flatten` fields read no column of their own
+ --> tests/ui/from_row_rename.rs:6:5
+  |
+6 | /     #[tisqlx(skip, rename = "x")]
+7 | |     a: i64,
+  | |__________^
+
+error: `rename = "x"` has no effect here: tuple fields are read by position, and `skip`/`flatten` fields read no column of their own
+  --> tests/ui/from_row_rename.rs:17:5
+   |
+17 | /     #[tisqlx(flatten, rename = "x")]
+18 | |     inner: Inner,
+   | |________________^

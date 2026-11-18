@@ -67,8 +67,8 @@ pub fn analyze(sql: &str) -> Analysis {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Word,
-    /// `` `quoted identifier` ``
-    Quoted,
+    /// `` `quoted` ``, or a word right after a dot (`t.order`): an identifier, never a keyword.
+    Ident,
     Literal,
     Placeholder,
     Op,
@@ -138,7 +138,7 @@ fn tokenize(sql: &str) -> (Vec<Tok>, bool) {
             }
             b'`' => {
                 i = quoted_end(i + 1, c);
-                Kind::Quoted
+                Kind::Ident
             }
             b'?' => {
                 i += 1;
@@ -174,7 +174,7 @@ fn tokenize(sql: &str) -> (Vec<Tok>, bool) {
                 while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'$' || b[i] >= 0x80) {
                     i += 1;
                 }
-                Kind::Word
+                if toks.last().is_some_and(|t: &Tok| t.kind == Kind::Dot) { Kind::Ident } else { Kind::Word }
             }
             _ => {
                 let three = sql.get(i..i + 3);
@@ -388,8 +388,11 @@ impl Analyzer<'_> {
                     "FROM" => Clause::From,
                     "WHERE" => Clause::Where,
                     "SET" => Clause::Set,
-                    "GROUP" | "HAVING" | "ORDER" | "LIMIT" | "WINDOW" | "FOR" | "LOCK" | "INTO" | "VALUES"
-                    | "VALUE" | "SELECT" => Clause::Other,
+                    // Not VALUE/VALUES: `value` is a legal column name (`SET value = ?, b = ?`), and
+                    // the rows of INSERT ... VALUES are parenthesised, so never compared anyway.
+                    "GROUP" | "HAVING" | "ORDER" | "LIMIT" | "WINDOW" | "FOR" | "LOCK" | "INTO" | "SELECT" => {
+                        Clause::Other
+                    }
                     // `ON DUPLICATE KEY UPDATE col = ?` assigns like SET.
                     "UPDATE" if i >= 2 && self.is(i - 1, "KEY") => Clause::Set,
                     "UPDATE" => Clause::Other,
@@ -516,7 +519,7 @@ impl Analyzer<'_> {
 
     fn is_ident(&self, i: usize) -> bool {
         match self.kind(i) {
-            Some(Kind::Quoted) => true,
+            Some(Kind::Ident) => true,
             Some(Kind::Word) => !self.is_any(i, NOT_IDENT),
             _ => false,
         }
@@ -701,8 +704,7 @@ const AFTER: &[&str] = &[
 /// Words that are never a column name in these positions.
 const NOT_IDENT: &[&str] = &[
     "NULL", "TRUE", "FALSE", "NOT", "AND", "OR", "XOR", "IS", "IN", "LIKE", "BETWEEN", "WHERE", "SET", "SELECT",
-    "FROM", "ON", "WHEN", "THEN", "ELSE", "END", "CASE", "UPDATE", "VALUES", "VALUE", "INTERVAL", "BINARY", "DEFAULT",
-    "EXISTS",
+    "FROM", "ON", "WHEN", "THEN", "ELSE", "END", "CASE", "UPDATE", "VALUES", "INTERVAL", "BINARY", "DEFAULT", "EXISTS",
 ];
 
 #[cfg(test)]
@@ -793,6 +795,31 @@ mod tests {
         assert_eq!(sites("INSERT INTO t (a) SELECT b FROM u WHERE c = ?"), s(&[None]));
         let a = analyze("INSERT INTO db.t (a) VALUES (?)");
         assert_eq!(a.probe(None).as_deref(), Some("SELECT a FROM db.t"));
+    }
+
+    #[test]
+    fn a_word_after_a_dot_is_an_identifier() {
+        assert_eq!(
+            sites("SELECT t.from FROM t WHERE t.order = ? AND t.limit = ?"),
+            s(&[Some("t.order"), Some("t.limit")])
+        );
+        assert_eq!(analyze("SELECT t.from FROM t WHERE t.where = ?").from.as_deref(), Some("t"));
+        assert_eq!(
+            sites("UPDATE t SET t.group = ?, t.set = ? WHERE t.null = ?"),
+            s(&[Some("t.group"), Some("t.set"), Some("t.null")])
+        );
+        assert_eq!(sites("SELECT a FROM t WHERE ? = t.select LIMIT ?"), s(&[Some("t.select"), Some("#")]));
+    }
+
+    #[test]
+    fn a_column_named_value_does_not_end_the_clause() {
+        assert_eq!(sites("UPDATE t SET value = ?, b = ? WHERE c = ?"), s(&[Some("value"), Some("b"), Some("c")]));
+        assert_eq!(sites("SELECT a FROM t WHERE value = ? AND b = ?"), s(&[Some("value"), Some("b")]));
+        assert_eq!(sites("INSERT INTO t (value, b) VALUES (?, ?)"), s(&[Some("value"), Some("b")]));
+        assert_eq!(
+            sites("INSERT INTO t (a, b) VALUES (?, ?) ON DUPLICATE KEY UPDATE a = VALUES(a) + ?, b = ?"),
+            s(&[Some("a"), Some("b"), None, Some("b")])
+        );
     }
 
     #[test]

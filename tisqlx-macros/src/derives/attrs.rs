@@ -53,20 +53,28 @@ impl RenameAll {
     }
 }
 
+/// Split an identifier into words: at `_`/`-`, before an uppercase letter that follows a
+/// lowercase one or a digit, and before the last capital of an acronym (`HTTPServer` is
+/// `HTTP`, `Server`).
 fn split_words(ident: &str) -> Vec<String> {
+    let chars: Vec<char> = ident.trim_start_matches("r#").chars().collect();
     let mut words = Vec::new();
     let mut cur = String::new();
-    for c in ident.trim_start_matches("r#").chars() {
+    for (i, &c) in chars.iter().enumerate() {
         if c == '_' || c == '-' {
             if !cur.is_empty() {
                 words.push(std::mem::take(&mut cur));
             }
-        } else if c.is_uppercase() && !cur.is_empty() && !cur.chars().last().unwrap().is_uppercase() {
-            words.push(std::mem::take(&mut cur));
-            cur.push(c);
-        } else {
-            cur.push(c);
+            continue;
         }
+        if c.is_uppercase() && i > 0 && !cur.is_empty() {
+            let after_upper = chars[i - 1].is_uppercase();
+            let before_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            if !after_upper || before_lower {
+                words.push(std::mem::take(&mut cur));
+            }
+        }
+        cur.push(c);
     }
     if !cur.is_empty() {
         words.push(cur);
@@ -156,5 +164,19 @@ mod tests {
         assert_eq!(RenameAll::Pascal.apply("user_id"), "UserId");
         assert_eq!(RenameAll::ScreamingSnake.apply("InProgress"), "IN_PROGRESS");
         assert_eq!(RenameAll::Kebab.apply("InProgress"), "in-progress");
+        assert_eq!(RenameAll::Lower.apply("InProgress"), "inprogress");
+        assert_eq!(RenameAll::Upper.apply("in_progress"), "IN_PROGRESS");
+    }
+
+    #[test]
+    fn acronyms_are_one_word() {
+        assert_eq!(RenameAll::Snake.apply("HTTPServer"), "http_server");
+        assert_eq!(RenameAll::Snake.apply("UserID"), "user_id");
+        assert_eq!(RenameAll::Snake.apply("ID"), "id");
+        assert_eq!(RenameAll::Kebab.apply("Sha256Sum"), "sha256-sum");
+        assert_eq!(RenameAll::Camel.apply("HTTPServer"), "httpServer");
+        assert_eq!(RenameAll::Pascal.apply("r#type"), "Type");
+        assert_eq!(RenameAll::Snake.apply("A"), "a");
+        assert_eq!(RenameAll::Snake.apply("AB_c"), "ab_c");
     }
 }

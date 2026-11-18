@@ -16,4 +16,9 @@ enum BadVariantAttr {
 #[tisqlx(transparent)]
 struct Old(i32);
 
+#[derive(tisqlx::Type)]
+enum Generic<const N: usize> {
+    A,
+}
+
 fn main() {}

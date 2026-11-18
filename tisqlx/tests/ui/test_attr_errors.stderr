@@ -21,3 +21,9 @@ error: #[tisqlx::test] functions take no argument or one `tisqlx::Pool`
    |
 11 | async fn two_arguments(a: tisqlx::Pool, b: tisqlx::Pool) {}
    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `migrations` given twice: a test takes one migrations directory
+  --> tests/ui/test_attr_errors.rs:13:49
+   |
+13 | #[tisqlx::test(migrations = "tests/migrations", migrations = "tests/migrations_padded")]
+   |                                                 ^^^^^^^^^^
