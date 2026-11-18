@@ -66,7 +66,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 | `tisqlx-macros` | `query!` family, `migrate!`, `#[derive(FromRow, Type)]`, `#[tisqlx::test]` (proc-macro crate, used through `tisqlx`) |
 | `tisqlx-cli` | `tisqlx` binary: `database`, `migrate`, `prepare` |
 
-## Connection URL
+## Connecting
 
 `tidb://user:pass@host:4000/db?ssl-mode=verify-identity&txn-mode=optimistic&resource-group=rg1`
 (`mysql://` is accepted too; the user defaults to `root`, the host to `localhost`, the port to 4000).
@@ -85,11 +85,16 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 | `load-balance-dns` | `false` | see below |
 
 Any other key is set as a session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
-Values are percent-decoded (they must be valid UTF-8), and `+` is a literal plus
-(`timezone=+08:00`).
+Its name may only contain letters, digits, `_` and `.`.
 
-**Several TiDB servers.** List them in the URL (`tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`;
-hosts without a port use 4000) or with `ConnectOptions::hosts`.
+The user, password, database, keys and values are percent-decoded, and must then be valid
+UTF-8. A `+` is a literal plus (`timezone=+08:00`), not a space.
+
+### Several TiDB servers
+
+List them in the URL (`tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`; hosts without a port
+use 4000) or with `ConnectOptions::hosts`.
+
 - **Balancing:** a `Pool` opens each new connection on the server with the fewest of its
   connections.
 - **Failover:** a server that fails to connect is skipped for a while, with backoff from 1 s up
@@ -99,6 +104,7 @@ hosts without a port use 4000) or with `ConnectOptions::hosts`.
 - **No failover on other errors:** only network errors and a server at its connection limit
   (error 1040) move on to the next server; a wrong password fails at once.
 - **Single connections:** `TiConnection::connect` tries the servers in order.
+- **Unix socket:** with `socket`, the host list is not used.
 - **One DNS name with several addresses** (e.g. a Kubernetes headless service): add
   `load-balance-dns=true` to balance over its addresses.
 - **Moving existing connections:** they stay where they are, so after an outage a recovered
@@ -106,9 +112,59 @@ hosts without a port use 4000) or with `ConnectOptions::hosts`.
 - **Monitoring:** `Pool::host_connections()` shows the spread, and `server_addr()` on a
   connection says where it landed.
 
-**Bulk inserts.** One row per `INSERT` is the slowest way to load TiDB. `BulkInsert` batches
-rows into multi-row prepared statements. Measured with 10 connections: about 20× more rows per
-second than row by row, on the local playground cluster (209 000 vs 10 200 rows/s).
+### Authentication and TLS
+
+`mysql_native_password` works on every transport. TiDB has no RSA key exchange, so a
+`caching_sha2_password` account needs TLS or a Unix socket; tisqlx reports this clearly instead
+of failing with "access denied". The default `ssl-mode=preferred` uses TLS whenever the server
+offers it. `preferred` and `required` encrypt without verifying the certificate, `verify-ca`
+verifies its chain, and `verify-identity` also its host name. Use `verify-identity` for TiDB Cloud.
+
+## Connection pool
+
+`PoolOptions` and their defaults:
+
+| option | default | meaning |
+|---|---|---|
+| `max_connections` | 10 | at least 1 |
+| `min_connections` | 0 | connections kept open; capped at `max_connections` |
+| `acquire_timeout` | 30 s | how long `acquire()` waits for a free connection |
+| `idle_timeout` | 10 min | closes connections idle for this long, down to `min_connections` |
+| `max_lifetime` | 30 min | closes a connection this long after it was opened, once it is returned |
+| `test_before_acquire` | `true` | ping an idle connection before handing it out |
+| `ping_after_idle` | 30 s | only ping a connection that sat idle at least this long |
+| `after_connect` | | callback run on every new connection |
+
+**Checkouts** ping a connection only if it sat idle for at least `ping_after_idle`. A
+connection used moments ago is handed out as is. If the server dropped it in the meantime (a
+restart or a `KILL`), that one query fails and the pool discards the connection.
+`ping_after_idle(Duration::ZERO)` pings on every checkout, and `test_before_acquire(false)`
+never pings.
+
+## Statements and transactions
+
+**`rows_affected()`** counts the rows a statement matched, not the rows it changed (tisqlx sets
+`CLIENT_FOUND_ROWS`), so an `UPDATE` that leaves a row as it was still counts it.
+
+**The statement cache** keeps up to `statement-cache-capacity` prepared statements per
+connection. It survives DDL: TiDB reports the schema change (error 8113), and the statement
+is prepared again, once. TiDB binds a prepared statement to the database that was current
+when it was prepared, so a statement that starts with `USE` empties the cache.
+
+**DDL inside a transaction** commits it, as always in TiDB. A nested `commit()` or
+`rollback()` after it fails with an error that says so, and so does the outer `commit()`.
+Without a nested level nothing is reported: the top-level `commit()` succeeds, with nothing
+left to commit.
+
+**Nested transactions** are savepoints. Inside a stale read they send nothing: a stale read
+is read-only, and TiDB has no savepoints in it.
+
+## Bulk inserts
+
+One row per `INSERT` is the slowest way to load TiDB. `BulkInsert` batches rows into
+multi-row prepared statements. Measured with 10 connections on the local playground cluster
+(`make bench-cluster`): about 20× more rows per second than row by row (209 000 vs 10 200
+rows/s).
 
 ```rust
 use tisqlx::BulkInsert;
@@ -127,23 +183,19 @@ BulkInsert::new("users", &["name", "email"]).execute(&pool, rows).await?;
   error.
 - **Inside a transaction** (`execute(&mut tx, …)`): the load is all or nothing, but it must then
   fit TiDB's transaction size limit.
-
-**Pool checkouts** ping a connection only if it sat idle for at least `ping_after_idle`
-(default 30 s). A connection used moments ago is handed out as is. If the server dropped it
-in the meantime (a restart or a `KILL`), that one query fails and the pool discards the
-connection. `PoolOptions::ping_after_idle(Duration::ZERO)` pings on every checkout, and
-`test_before_acquire(false)` never pings.
-
-**`rows_affected()`** counts the rows a statement matched, not the rows it changed (tisqlx sets
-`CLIENT_FOUND_ROWS`), so an `UPDATE` that leaves a row as it was still counts it.
-
-**DDL inside a transaction** commits it, as always in TiDB. A nested `commit()` or
-`rollback()` after it fails with an error that says so, and so does the outer `commit()`.
+- **`finish()` sends the last batch.** Dropping the writer without it sends nothing and logs
+  a warning.
+- **Configuration errors:** no column, a column listed twice, or
+  `on_duplicate_key_update(&[])`.
 
 ## Query macros
 
-Set `DATABASE_URL`, either in the environment or in a `.env` file in the crate or one of its
-ancestors. Nullability comes from TiDB's column metadata: TiDB keeps `NOT NULL` accurately,
+Set `DATABASE_URL` in the environment or in a `.env` file. The macros read the nearest
+`.env`, starting from the crate's directory and going up; the environment wins over it.
+Without `DATABASE_URL`, or with `TISQLX_OFFLINE=true`, they use the offline data instead (see
+*Offline builds* below).
+
+Nullability comes from TiDB's column metadata: TiDB keeps `NOT NULL` accurately,
 and drops it for the nullable side of outer joins and for `MAX`/`MIN`/`SUM`/`AVG`. Override it
 in the column alias:
 
@@ -217,7 +269,43 @@ Arguments accepted for each column type. `&T`, `Option<T>`, `Box<T>`, `Arc<T>` a
 
 **Offline builds (CI):** run `tisqlx prepare` with a database available and commit
 `.tisqlx/`. Then build with `TISQLX_OFFLINE=true`. `tisqlx prepare --check` fails when the
-data is stale.
+data is stale. The macros look for `.tisqlx/` in the crate's directory, then upwards as far
+as the workspace root (the directory with `Cargo.lock`).
+
+## Derives
+
+```rust
+#[derive(tisqlx::FromRow)]
+#[tisqlx(rename_all = "camelCase")]
+struct User {
+    id: i64,                              // column `id`
+    created_at: NaiveDateTime,            // column `createdAt`
+    #[tisqlx(rename = "mail")]
+    email: Option<String>,
+    #[tisqlx(json)]
+    settings: Settings,                   // a JSON column, through serde
+}
+
+#[derive(tisqlx::Type)]
+#[tisqlx(rename_all = "snake_case")]
+enum Status { Active, InProgress }        // 'active', 'in_progress'
+
+#[derive(tisqlx::Type)]
+struct UserId(i64);                       // encodes and decodes as its field
+```
+
+- **`FromRow`** is for structs. Named fields are read by column name, tuple fields by
+  position. Field attributes: `rename = "col"`, `default` (the type's default when the column
+  is absent), `json`, `try_from = "Type"` (decode as `Type`, then `TryFrom`), `flatten` (a
+  nested `FromRow`) and `skip` (always the default).
+- **`Type`** is for a struct with one unnamed field, or an enum without fields, which is
+  stored as text (`VARCHAR` or `ENUM`). Variants take `rename = "value"`.
+- **`rename_all`** takes `lowercase`, `UPPERCASE`, `snake_case`, `SCREAMING_SNAKE_CASE`,
+  `kebab-case`, `camelCase` or `PascalCase`. An acronym is one word: `HTTPServer` becomes
+  `http_server`.
+- **Compile errors:** an unknown attribute; `rename` on a tuple field or next to `skip` or
+  `flatten`; more than one of `skip`, `flatten`, `try_from` and `json`; `default` with
+  anything but `json`; `Type` on a generic enum.
 
 ## Type mapping
 
@@ -246,9 +334,11 @@ off). `SET` columns become `types::Set`. UUID and VECTOR columns look like binar
 columns to the macros, so they need an override such as `` AS `id: Uuid` ``.
 
 **Decoding is exact.** A value the Rust type can't hold is an error, never rounded or cut: a
-`DECIMAL` too wide for `Decimal`, a `DOUBLE` out of `f32` range, or a `DATETIME` with a time
-of day read as a date type (use a datetime type or `DATE(col)`). The zero date `0000-00-00`
-(non-strict `sql_mode`) is an error for every date and datetime type, `Option<_>` included.
+`DECIMAL` too wide for `Decimal`, a fractional `DECIMAL` read as an integer, a `DOUBLE` out
+of `f32` range, or a `DATETIME` with a time of day read as a date type (use a datetime type
+or `DATE(col)`). The one exception is asking for a float: `f32`/`f64` round a `DECIMAL`, and
+`f32` rounds a `DOUBLE` that is within its range. The zero date `0000-00-00` (non-strict
+`sql_mode`) is an error for every date and datetime type, `Option<_>` included.
 
 **Time zones.** TiDB sends and receives DATETIME and TIMESTAMP values as wall times in the
 session `time_zone`. Naive types (`NaiveDateTime`, `PrimitiveDateTime`) are those wall times
@@ -266,14 +356,6 @@ session zone on the client, using the system time zone database:
 - **A zone missing from the client's database** (e.g. a container without tzdata) makes
   instant types fail with an error. Naive types keep working.
 
-## Authentication and TLS
-
-`mysql_native_password` works on every transport. TiDB has no RSA key exchange, so a
-`caching_sha2_password` account needs TLS or a Unix socket; tisqlx reports this clearly instead
-of failing with "access denied". The default `ssl-mode=preferred` uses TLS whenever the server
-offers it. `preferred` and `required` encrypt without verifying the certificate, `verify-ca`
-verifies its chain, and `verify-identity` also its host name. Use `verify-identity` for TiDB Cloud.
-
 ## Tests with a database
 
 ```rust
@@ -288,28 +370,51 @@ async fn lists_posts(pool: tisqlx::Pool) {
 }
 ```
 
-Fixtures are SQL files (several statements allowed) applied after the migrations, in the order
-given. Their paths are relative to the crate root, like `migrations`. They are embedded at
-compile time, so editing one rebuilds the tests that use it.
-
-Each test gets its own database (`_tisqlx_test_<name>_<hash>`) on the server named by
-`DATABASE_URL`. The database is recreated at the start of each run and dropped when the test
-returns. If the test panics, it is left in place so you can inspect it.
+- **Arguments**, both optional: `migrations = "dir"` (one directory) and
+  `fixtures("a.sql", …)`. Anything else is a compile error, and so is a missing fixture file.
+- **The function** is `async`, takes nothing or one `tisqlx::Pool`, and may return a `Result`.
+- **Fixtures** are SQL files (several statements allowed) applied after the migrations, in
+  the order given. Their paths are relative to the crate root, like `migrations`. They are
+  embedded at compile time, so editing one rebuilds the tests that use it.
+- **The database:** each test gets its own (`_tisqlx_test_<name>_<hash>`) on the server named
+  by `DATABASE_URL`. It is recreated at the start of each run and dropped when the test
+  returns. If the test panics, it is left in place so you can inspect it.
+- **`DATABASE_URL` at run time** comes from the environment only: the test binary does not
+  read `.env`, unlike the macros at compile time.
 
 ## CLI
 
 ```sh
 cargo install --path tisqlx-cli
-tisqlx database setup                 # create DB + run migrations (also: create, drop, reset)
-tisqlx migrate add -r create_users    # reversible migration
-tisqlx migrate run | revert [--all] | info        # run and revert take --dry-run
+tisqlx database setup                 # create the database and run the migrations
+tisqlx migrate add -r create_users    # a reversible migration (.up.sql and .down.sql)
+tisqlx migrate run --dry-run          # list what would be applied
 tisqlx migrate repair 20260101000000 --applied   # after fixing a dirty migration by hand
-tisqlx migrate build-script           # build.rs so migrate!() picks up new files
-tisqlx prepare [--check] [-- <cargo check args>]   # offline data for query! macros
+tisqlx prepare --check                # fail if the offline query data is stale
 ```
 
-Every command that needs the database takes `-D <url>` or reads `DATABASE_URL` (a `.env` file
-works too). Migrations are read from `./migrations` unless `--source <dir>` says otherwise.
+| command | does | flags |
+|---|---|---|
+| `database create` | `CREATE DATABASE IF NOT EXISTS` | |
+| `database drop` | `DROP DATABASE IF EXISTS`, after asking | `-y` |
+| `database setup` | creates the database and runs the migrations | |
+| `database reset` | drops, creates and migrates, after asking. It reads the migrations before it drops anything. | `-y` |
+| `migrate add <description>` | creates a migration file. The version style and the reversibility follow the existing files. | `-r`/`--reversible`, `-s`/`--simple`, `--sequential`, `-t`/`--timestamp` |
+| `migrate run` | applies the pending migrations | `--dry-run`, `--target-version <v>`, `--ignore-missing` |
+| `migrate revert` | reverts the latest migration | `--dry-run`, `--target-version <v>` (everything newer), `--all`, `--ignore-missing` |
+| `migrate info` | lists every migration and its status | |
+| `migrate repair <version>` | clears a dirty migration after a fix by hand | `--applied` (mark it applied) or `--remove` (run it again next time) |
+| `migrate build-script` | writes a `build.rs`, so `migrate!()` picks up new files | `--force` |
+| `prepare` | writes the offline data of the query macros to `.tisqlx/` | `--check`, `-- <cargo check args>` |
+
+- **The database URL:** every command that connects takes `-D <url>` or reads
+  `DATABASE_URL`, from the environment or from the nearest `.env` file. The CLI looks for
+  `.env` from the current directory upwards; the macros look from the crate's directory.
+- **Migrations** are read from `./migrations` unless `--source <dir>` says otherwise.
+- **`prepare`** runs `cargo check --workspace --all-targets`. Arguments after `--` go to
+  `cargo check`: with `-p`/`--package` or `--exclude` only those packages are checked, and
+  the other packages' files in `.tisqlx/` are kept. `--manifest-path` selects another
+  workspace.
 
 ## Development
 
@@ -321,9 +426,9 @@ make ci        # lint, feature sets, tests, offline-data check
 
 `cargo test` alone works without a database: live tests skip, and the macros compile from the
 committed `.tisqlx/` data. See [TESTING.md](TESTING.md) for the test strategy and
-[TODO.md](TODO.md) for the known gaps. The live tests create the databases `tisqlx_t_*` and
-`tisqlx_macros`, and two unprivileged accounts, `tisqlx_sha` and `tisqlx_nat`, on the test
-server.
+[TODO.md](TODO.md) for the known gaps. The live tests create the databases `tisqlx_t_*`,
+`tisqlx_macros` and `_tisqlx_test_*`, and two unprivileged accounts, `tisqlx_sha` and
+`tisqlx_nat`, on the test server.
 
 [TiDB]: https://www.pingcap.com/tidb/
 [sqlx]: https://github.com/launchbadge/sqlx
