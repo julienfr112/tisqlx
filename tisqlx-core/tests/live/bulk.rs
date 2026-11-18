@@ -118,6 +118,44 @@ async fn a_failed_batch_reports_what_was_written() {
 
 #[tokio::test]
 #[ignore = "needs a TiDB: run with `make test-live`"]
+async fn a_cancelled_batch_fails_the_writer() {
+    require_db!();
+    let (opts, mut conn) = table("bulkcancel").await;
+    // Another session holds the lock on id 10: the batch that inserts it has to wait.
+    let mut blocker = opts.connect().await.unwrap();
+    let mut tx = blocker.begin_with(&TxnOptions::pessimistic()).await.unwrap();
+    tx.execute_raw("INSERT INTO t (id) VALUES (10)").await.unwrap();
+
+    let mut w = BulkInsert::new("t", &["id"]).max_rows(10).start(&mut conn).await.unwrap();
+    for i in 1..10i64 {
+        w.push((i,)).await.unwrap();
+    }
+    let cancelled = tokio::time::timeout(std::time::Duration::from_millis(300), w.push((10i64,))).await;
+    assert!(cancelled.is_err(), "the batch waits for the lock");
+    // The ten rows are neither written nor pending: the writer must not report success.
+    let err = w.finish().await.unwrap_err();
+    assert!(err.to_string().contains("interrupted"), "{err}");
+    assert!(w.push((11i64,)).await.is_err());
+    assert_eq!(w.rows_written(), 0);
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn configuration_errors() {
+    require_db!();
+    let (_, mut conn) = table("bulkconfig").await;
+    for (insert, expected) in [
+        (BulkInsert::new("t", &[]), "at least one column"),
+        (BulkInsert::new("t", &["id", "n", "id"]), "`id` is listed twice"),
+        (BulkInsert::new("t", &["id"]).on_duplicate_key_update(&[]), "`on_duplicate_key_update` needs"),
+    ] {
+        let err = insert.execute(&mut conn, [(1i64,)]).await.unwrap_err();
+        assert!(matches!(err, Error::Configuration(_)) && err.to_string().contains(expected), "{err}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn inside_a_transaction_it_is_all_or_nothing() {
     require_db!();
     let (_, mut conn) = table("bulktx").await;

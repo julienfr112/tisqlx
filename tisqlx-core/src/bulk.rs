@@ -23,7 +23,8 @@
 //!
 //! **Transactions.** Outside a transaction each batch commits on its own: if one fails, the
 //! batches before it stay. [`rows_written`](BulkWriter::rows_written) says how many rows those
-//! held, and the writer refuses further rows. Inside a transaction (`start(&mut tx)`) the load
+//! held, and the writer refuses further rows. The same goes for a batch whose `push` was dropped
+//! (cancelled) while it was being sent. Inside a transaction (`start(&mut tx)`) the load
 //! is all or nothing, but then all of it must fit `txn-total-size-limit`; TiDB rejects it
 //! otherwise (error 8004).
 
@@ -143,6 +144,9 @@ impl BulkInsert {
                 return Err(Error::config(format!("column `{c}` is listed twice")));
             }
         }
+        if matches!(&self.conflict, Conflict::Update(cols) if cols.is_empty()) {
+            return Err(Error::config("`on_duplicate_key_update` needs at least one column"));
+        }
         let mut conn = db.acquire().await?;
         let max_bytes = match self.max_batch_bytes {
             Some(b) => b,
@@ -167,6 +171,7 @@ impl BulkInsert {
             rows_written: 0,
             rows_affected: 0,
             failed: false,
+            last_push_failed: false,
             full_sql: None,
         })
     }
@@ -207,7 +212,8 @@ async fn txn_size_limit(conn: &mut TiConnection) -> usize {
     }
 }
 
-/// Streams rows into batched `INSERT`s. Call [`finish`](Self::finish) to send the last batch.
+/// Streams rows into batched `INSERT`s. Call [`finish`](Self::finish) to send the last batch:
+/// dropping the writer does not send it (it only logs a warning).
 pub struct BulkWriter<C: DerefMut<Target = TiConnection>> {
     conn: C,
     prefix: String,
@@ -220,7 +226,10 @@ pub struct BulkWriter<C: DerefMut<Target = TiConnection>> {
     rows: usize,
     rows_written: u64,
     rows_affected: u64,
+    /// A batch failed, or its `push` was dropped while sending it: its rows are lost.
     failed: bool,
+    /// The caller has an error in hand: no need to warn about unsent rows on drop.
+    last_push_failed: bool,
     /// The SQL of a full batch, built once.
     full_sql: Option<String>,
 }
@@ -241,9 +250,13 @@ impl<C: DerefMut<Target = TiConnection>> BulkWriter<C> {
     /// Add a row; sends a batch when one is full. A row with the wrong number of columns or a
     /// value that fails to encode is rejected here, and the writer carries on without it.
     pub async fn push(&mut self, row: impl BulkRow) -> Result<()> {
-        if self.failed {
-            return Err(Error::config("a previous batch of this bulk insert failed"));
-        }
+        let pushed = self.push_row(row).await;
+        self.last_push_failed = pushed.is_err();
+        pushed
+    }
+
+    async fn push_row(&mut self, row: impl BulkRow) -> Result<()> {
+        self.check_not_failed()?;
         let mut args = Arguments::new();
         row.bind(&mut args);
         if let Some(e) = args.error.take() {
@@ -269,9 +282,7 @@ impl<C: DerefMut<Target = TiConnection>> BulkWriter<C> {
 
     /// Send the last batch. Returns the rows written in all.
     pub async fn finish(&mut self) -> Result<u64> {
-        if self.failed {
-            return Err(Error::config("a previous batch of this bulk insert failed"));
-        }
+        self.check_not_failed()?;
         if self.rows > 0 {
             self.flush().await?;
         }
@@ -289,6 +300,13 @@ impl<C: DerefMut<Target = TiConnection>> BulkWriter<C> {
         self.rows_affected
     }
 
+    fn check_not_failed(&self) -> Result<()> {
+        if self.failed {
+            return Err(Error::config("a previous batch of this bulk insert failed or was interrupted"));
+        }
+        Ok(())
+    }
+
     async fn flush(&mut self) -> Result<()> {
         let rows = std::mem::take(&mut self.rows);
         let args = std::mem::take(&mut self.batch);
@@ -304,17 +322,13 @@ impl<C: DerefMut<Target = TiConnection>> BulkWriter<C> {
                 sql
             }
         };
-        match query_with(sql, args).persistent(full).execute(&mut *self.conn).await {
-            Ok(r) => {
-                self.rows_written += rows as u64;
-                self.rows_affected += r.rows_affected;
-                Ok(())
-            }
-            Err(e) => {
-                self.failed = true;
-                Err(e)
-            }
-        }
+        // Until the batch is known to be written: this future may be dropped while it is sent.
+        self.failed = true;
+        let r = query_with(sql, args).persistent(full).execute(&mut *self.conn).await?;
+        self.failed = false;
+        self.rows_written += rows as u64;
+        self.rows_affected += r.rows_affected;
+        Ok(())
     }
 
     fn sql(&self, rows: usize) -> String {
@@ -333,8 +347,9 @@ impl<C: DerefMut<Target = TiConnection>> BulkWriter<C> {
 
 impl<C: DerefMut<Target = TiConnection>> Drop for BulkWriter<C> {
     fn drop(&mut self) {
-        if self.rows > 0 && !self.failed {
-            log::warn!("bulk insert dropped with {} rows not sent; call `finish()`", self.rows);
+        // Not when the caller is already handling an error (or a panic) and gives up the load.
+        if self.rows > 0 && !self.last_push_failed && !std::thread::panicking() {
+            log::warn!("bulk insert dropped without `finish()`: its last {} rows were not sent", self.rows);
         }
     }
 }
