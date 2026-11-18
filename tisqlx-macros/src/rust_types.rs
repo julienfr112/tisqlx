@@ -58,7 +58,7 @@ pub fn rust_type_for(ty: &TypeInfo) -> Result<TokenStream, String> {
         }
         VarChar | VarString | String | TinyBlob | MediumBlob | LongBlob | Blob => quote!(::std::string::String),
         Geometry => quote!(::std::vec::Vec<u8>),
-        Null => return Err("column type is NULL; add a type override such as `AS \"col?: String\"`".into()),
+        Null => return Err("column type is NULL; add a type override such as ``AS `col?: String` ``".into()),
     })
 }
 

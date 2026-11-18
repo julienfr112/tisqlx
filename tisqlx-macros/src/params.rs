@@ -30,9 +30,7 @@ pub enum Site {
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Analysis {
-    /// Number of `?` placeholders.
-    pub placeholders: usize,
-    /// One entry per placeholder.
+    /// One entry per `?` placeholder.
     pub sites: Vec<Option<Site>>,
     /// Column expressions, as written in the query.
     pub partners: Vec<String>,
@@ -56,7 +54,7 @@ impl Analysis {
 pub fn analyze(sql: &str) -> Analysis {
     let (toks, executable_comment) = tokenize(sql);
     let placeholders = toks.iter().filter(|t| t.kind == Kind::Placeholder).count();
-    let mut a = Analysis { placeholders, sites: vec![None; placeholders], ..Analysis::default() };
+    let mut a = Analysis { sites: vec![None; placeholders], ..Analysis::default() };
     if toks.is_empty() || executable_comment {
         return a;
     }
@@ -731,10 +729,10 @@ mod tests {
     fn placeholders_in_literals_and_comments_are_not_counted() {
         let sql = "SELECT '?', \"?\", `?`, 'it''s ?', 'a\\'?' -- ?\n # ?\n /* ? */ FROM t WHERE a = ?";
         let a = analyze(sql);
-        assert_eq!(a.placeholders, 1);
+        assert_eq!(a.sites.len(), 1);
         assert_eq!(sites(sql), s(&[Some("a")]));
         // `--` needs a space to start a comment: `a--?` is `a - (-?)`
-        assert_eq!(analyze("SELECT a--?").placeholders, 1);
+        assert_eq!(analyze("SELECT a--?").sites.len(), 1);
     }
 
     #[test]

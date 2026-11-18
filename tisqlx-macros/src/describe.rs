@@ -120,7 +120,7 @@ async fn describe_and_infer(
 ) -> tisqlx_core::Result<(Describe, Vec<Option<TypeInfo>>)> {
     let describe = conn.describe(sql).await?;
     let analysis = crate::params::analyze(sql);
-    if analysis.placeholders != describe.params.len() {
+    if analysis.sites.len() != describe.params.len() {
         // The lexer and the server disagree: check nothing rather than the wrong parameters.
         return Ok((describe, Vec::new()));
     }
