@@ -6,9 +6,11 @@ it is tested.
 
 ## Housekeeping
 
-- [ ] **Deferred: run CI once for real**, when the repository has a remote. Until then
-  `.github/workflows/ci.yml` has never run. [TESTING.md § CI](TESTING.md#ci) lists what was
-  checked locally, what wasn't, and the steps for the first run.
+- [ ] **P2: Confirm CI is green on GitHub.** The repository has a remote now, but no run of
+  `.github/workflows/ci.yml` has been checked. [TESTING.md § CI](TESTING.md#ci) lists what
+  only a real run can show. Trigger the `cluster` job once by hand.
+- [ ] **P2: No licence files.** The manifests say `MIT OR Apache-2.0`; add `LICENSE-MIT` and
+  `LICENSE-APACHE` before publishing.
 
 ## Correctness
 
@@ -71,157 +73,89 @@ it is tested.
 
 ## Done
 
-"mock" is `tisqlx-core/tests/mock/`, "live" is `tisqlx-core/tests/live/`. Items marked
-**(no test)** were fixed by inspection only; the others have a test, and the mock tests were
-checked to fail when the fix is reverted.
+Completed work that isn't obvious from the README, and the test that covers it. "mock" is
+`tisqlx-core/tests/mock/`, "live" is `tisqlx-core/tests/live/`. Items marked **(no test)**
+were fixed by inspection only.
 
 **Correctness**
-- **Migration lock released after a cancelled run.** A run can only be cancelled mid-command, and
-  then the connection is discarded and the server frees the lock with the session.
-  - Test: live `cancelled_run_releases_the_migration_lock` (it would pass without the new code).
-  - The new code covers the remaining case: `RELEASE_LOCK` itself failing. Connections that may
-    hold a lock are reset with `RELEASE_ALL_LOCKS()`.
-  - Test: mock `migration_lock_is_released_when_release_lock_fails`.
-- **Unknown column types read as strings** instead of breaking prepared queries.
-  Test: mock `unknown_column_type_is_read_as_a_string`.
-- **A failed `ROLLBACK TO SAVEPOINT` rolls back the whole transaction,** and the outer `commit()`
-  then fails instead of committing nothing silently.
-  Test: mock `failed_savepoint_rollback_aborts_the_whole_transaction`.
-- **Pool background work is bounded** by the connect timeout: reset on drop, ping on acquire,
-  close. Test: mock `hung_reset_is_abandoned_and_frees_its_slot`.
-- **`idle_timeout` and `min_connections` are enforced.** Idle connections are reused most recent
-  first, and a maintenance task retires expired connections and tops the pool up.
-  Tests: live `maintenance_reaps_idle_connections_and_keeps_the_minimum`,
+- **Migration lock released after a cancelled run.** A run can only be cancelled mid-command;
+  the connection is then discarded and the server frees the lock with the session (live
+  `cancelled_run_releases_the_migration_lock`). When `RELEASE_LOCK` itself fails, the
+  connection is reset with `RELEASE_ALL_LOCKS()` (mock
+  `migration_lock_is_released_when_release_lock_fails`).
+- **Unknown column types read as strings** instead of breaking prepared queries: mock
+  `unknown_column_type_is_read_as_a_string`.
+- **A failed `ROLLBACK TO SAVEPOINT` rolls back the whole transaction,** and the outer
+  `commit()` then fails: mock `failed_savepoint_rollback_aborts_the_whole_transaction`.
+- **A retried transaction rolls back before the next attempt:** mock
+  `retried_transaction_rolls_back_before_the_next_attempt`.
+- **Pool background work is bounded** by the connect timeout (reset on drop, ping on acquire,
+  close): mock `hung_reset_is_abandoned_and_frees_its_slot`.
+- **`idle_timeout` and `min_connections` are enforced,** and idle connections are reused most
+  recent first: live `maintenance_reaps_idle_connections_and_keeps_the_minimum`,
   `idle_connections_are_reused_most_recent_first`.
-- **A failed `BEGIN` with an isolation level** marks the connection broken, so the one-shot level
-  cannot leak to the next transaction. **(no test)**
+- **Pool pings only after `ping_after_idle`:** mock `recently_returned_connection_is_not_pinged`,
+  live `recently_used_connection_killed_by_the_server_fails_once`.
 - **Migration bookkeeping holds up against the migration's own SQL.** The migrations table is
-  qualified with its database (`USE other` is harmless), and a migration that leaves a
-  transaction open fails, is rolled back and stays dirty.
-  Test: live `migration_sql_cannot_break_the_bookkeeping`.
-- **`migrate revert --all`.** Test: `tisqlx-cli/tests/cli.rs`.
-- **Session variables are quoted unless they are plain decimal literals** (`inf`/`NaN` are now
-  quoted). **(no test)**
+  qualified with its database, and a migration that leaves a transaction open fails and stays
+  dirty (live `migration_sql_cannot_break_the_bookkeeping`). One that deletes its own record
+  fails with `NotApplied` (live `record_deleted_by_the_migration_fails_the_run`).
+- **The migration lock timeout is rounded up to whole seconds:** unit test in `migrate.rs`.
+- **TiDB older than 8.5 is refused:** mock `tidb_older_than_the_minimum_is_rejected`.
+- **A NULL parameter of every Rust type works in every column kind,** in writes and in
+  comparisons: live `null_of_every_type_into_every_column`.
+- **Hostile input** (`tisqlx-core/src/robustness.rs`): every packet, row and value decoder gets
+  random bytes and corrupted valid packets, and must return an error, never panic. It is a
+  deterministic stand-in for `cargo fuzz`, which needs nightly; `TISQLX_FUZZ_ITERS` runs it
+  longer. It found two overflows, in TIME hours and in binary DATETIME microseconds.
+- **(no test)** A failed `BEGIN` with an isolation level marks the connection broken, so the
+  one-shot level cannot leak to the next transaction.
+- **(no test)** Session variables are quoted unless they are plain decimal literals
+  (`inf`/`NaN` are quoted).
+- **(no reliable test)** An expired connection's pool slot is no longer over-counted. The live
+  pool tests check `size()` after a `max_lifetime` replacement, but the old transient
+  over-count would not reliably fail them.
 
 **Macros and offline data**
-- **`describe` times out after 30 s.** **(no test)**
-- **`query_file!` normalises CRLF**, so its offline data matches on every OS. **(no test)**
-- **Offline lookup stops at the workspace root** (the directory with `Cargo.lock`). **(no test)**
-- **`tisqlx prepare` honours `-p`/`--package` and `--manifest-path`.** Tests: unit, in
+- **Bind arguments are type-checked** where the analyzer finds the column next to a `?`:
+  unit `params::tests` and `bind_check::tests`, acceptance in `tisqlx/tests/macros.rs`
+  (`bind_arguments_of_compatible_types`), rejection in `tests/ui-query/bind_types.rs`.
+  Unsuffixed numeric literals are classified from the syntax, since their type is still being
+  inferred when the check runs.
+- **`tisqlx prepare` honours `-p`/`--package` and `--manifest-path`:** unit tests in
   `prepare.rs`.
-
-**Untested fixes now covered**
-- Rollback before a retry: mock `retried_transaction_rolls_back_before_the_next_attempt`.
-- Revert failure output: `cli.rs`.
-- Lock-timeout rounding: unit test.
-- An expired connection's slot: only indirectly (the live pool tests check `size()` after a
-  `max_lifetime` replacement; the old transient over-count would not reliably fail them).
-
-**Test infrastructure: the cluster tier**
-- **How to run:** `make db-cluster && make test-cluster`.
-  - It uses tiup playground with 2 TiDB, PD, TiKV and TiFlash, ports offset by 10000.
-  - The script refuses to start on busy ports.
-  - CI runs it nightly.
-- **Tests:** TiFlash reads, DDL on one node with a cached statement on the other, stale reads
-  returning old data, bounded staleness, and pessimistic lock-wait timeouts.
-- **Moved to the standard tier,** because they work standalone: the `resource-group` option, and
-  pool recovery after `KILL`.
+- **(no test)** `describe` times out after 30 s; `query_file!` normalises CRLF, so its offline
+  data matches on every OS; the offline lookup stops at the workspace root (the directory with
+  `Cargo.lock`).
 
 **Session time zones** (`tisqlx-core/src/tz.rs`)
-- **Instant types follow the session `time_zone`.** `DateTime<Utc>`, the new
-  `DateTime<FixedOffset>` and `DateTime<Local>`, and `OffsetDateTime` are converted on the
-  client: bind parameters at execute time, values at decode.
-  - Zone data comes from jiff with the system tzdata (bundled only on Windows).
-  - Around DST changes, wall times map to instants exactly as TiDB maps them (Go's
-    `time.Date`, with gap times clamped to the transition).
-  - `TiConnection::reload_time_zone()` handles a raw `SET time_zone`, since TiDB has no
-    session tracking.
-- Tests:
-  - unit `tz::tests`;
-  - live `timezone::*`: round trips through DATETIME and TIMESTAMP in Europe/Paris, and
-    DST parity with `UNIX_TIMESTAMP` in Paris and New York. Both were
-    checked to fail when the conversion is removed.
+- Zone data comes from jiff with the system tzdata (bundled only on Windows). Around DST
+  changes, wall times map to instants exactly as TiDB maps them (Go's `time.Date`, with gap
+  times clamped to the transition).
+- Tests: unit `tz::tests`; live `timezone::*` (round trips in Europe/Paris, and DST parity with
+  `UNIX_TIMESTAMP` in Paris and New York).
 
-**Pool pings only after `ping_after_idle`** (default 30 s; `Duration::ZERO` pings every time).
-Tests: mock `recently_returned_connection_is_not_pinged`, live
-`recently_used_connection_killed_by_the_server_fails_once`.
+**Features** (described in the README)
+- **`BulkInsert`:** unit tests for statement building and the time-zone offsets of appended
+  rows; live `bulk::*` for batching by rows and by bytes, instants and NULLs in a Paris session,
+  the three conflict modes, a failed second batch, and all or nothing inside a transaction.
+  `SHOW CONFIG` falls back to the 100 MB default of `txn-total-size-limit` when it isn't allowed.
+- **Several TiDB servers per pool:** unit `balance::tests` and URL parsing; mock (spread over two
+  servers, a dead one skipped, an unresponsive one only costs its share of the timeout, a wrong
+  password doesn't fail over); live (a dead host in the list, `localhost` with and without DNS
+  balancing); cluster (both TiDB nodes get connections).
+- **`Acquire`:** live `acquire_accepts_pools_connections_and_transactions`.
+- **`#[tisqlx::test]`, with migrations and fixtures:** `tisqlx/tests/test_attr.rs`, and
+  `tests/ui/test_attr_errors.rs` for the compile errors.
+- **`Pool::transaction_retry_if` and `tisqlx::error::is_retryable`:** live
+  `retry_with_a_foreign_error_type`.
+- **`i128`/`u128`, `&RawValue`, `Box<T>`/`Arc<T>`:** live `wide_integers_and_raw_json`.
+- **`migrate revert --all`,** and the output of a failed revert: `tisqlx-cli/tests/cli.rs`.
 
-**Bind arguments are type-checked at compile time** where the column next to a `?` can be
-found.
-- **How:**
-  - a lexical analyzer finds the column;
-  - a probe `SELECT <columns> FROM <the query's FROM>` gets its type from the server;
-  - autoref dispatch checks the argument's kind (`tisqlx_core::bind_check`).
-- **Never rejected:** types tisqlx cannot classify, including generic arguments and derived
-  newtypes over such types. `value as _` opts one argument out.
-- **Unsuffixed numeric literals** are classified from the syntax, since their type is still
-  being inferred when the check runs.
-- **Offline data** stores the inferred types: 31 of the 37 parameters in the repo's 18 queries
-  are checked.
-- **Tests:**
-  - unit `params::tests` (including placeholders inside strings and comments) and
-    `bind_check::tests`;
-  - acceptance in `tisqlx/tests/macros.rs` (`bind_arguments_of_compatible_types`);
-  - rejection in `tests/ui-query/bind_types.rs`.
-
-**Skipped tests are visible.** Every test that needs a database is `#[ignore]`d with the
-`make` target that runs it, so a plain `cargo test` reports them as ignored, not passed.
-`make test-live`/`test-cluster` pass `--include-ignored`.
-
-**More coverage**
-- A NULL parameter of every Rust type is ignored in every column kind, in writes and in
-  comparisons (35 types × 14 column kinds). Test: live `null_of_every_type_into_every_column`.
-- A migration that deletes its own record fails with `NotApplied`. Test: live
-  `record_deleted_by_the_migration_fails_the_run`.
-
-**Hostile input** (`tisqlx-core/src/robustness.rs`): every packet, row and value decoder gets
-random bytes and corrupted valid packets, and must return an error, never panic. It is a
-deterministic stand-in for `cargo fuzz`, which needs nightly. `TISQLX_FUZZ_ITERS` runs it
-longer; 1M iterations are clean. It found and fixed:
-- a TIME with a huge hour count overflowed: a panic in debug builds, a wrong value in release;
-- a binary DATETIME with microseconds ≥ 10⁶ overflowed the time-zone conversion.
-
-**TiDB 8.5 is the minimum.** Older TiDB is refused at connect time
-(`Error::UnsupportedTiDb`, opt out with `require-tidb=false`), and CI tests 8.5.8 only. The
-7.5-specific test workarounds were removed. Test: mock `tidb_older_than_the_minimum_is_rejected`.
-
-**Features**
-- **`BulkInsert`:** a streaming writer of multi-row prepared `INSERT`s.
-  - Batches are capped at 1000 rows (or 65 535 parameters) and by a byte budget from
-    `max_allowed_packet` and `txn-total-size-limit`. `SHOW CONFIG` falls back to the 100 MB
-    default when it isn't allowed.
-  - Supports `IGNORE`, `REPLACE` and `ON DUPLICATE KEY UPDATE`.
-  - Bad rows are rejected at `push`. After a failed batch, `rows_written()` is still readable
-    and the writer stops.
-  - Speed: about 20× the row-by-row insert (`make bench`, workload `bulk`).
-  - Tests:
-    - unit: statement building, and the time-zone offsets of appended rows;
-    - live: batching by rows and by bytes; `DateTime<Utc>` and NULLs in a Paris session,
-      checked to fail without the offset shift; the three conflict modes; a failed second
-      batch; all or nothing inside a transaction.
-- **Several TiDB servers per pool:** `tidb://u@a,b,c/db` or `ConnectOptions::hosts`.
-  - Least connections first, with backoff for servers that fail to connect.
-  - Each attempt gets a share of the connect timeout, and only network errors fail over.
-  - `load-balance-dns=true` balances over a DNS name's addresses.
-  - `Pool::host_connections()` and `TiConnection::server_addr()` show the spread.
-  - Tests:
-    - unit: `balance::tests` and URL parsing;
-    - mock: spread over two servers, skipping a dead one; an unresponsive server only costs
-      its share of the timeout; a wrong password doesn't fail over;
-    - live: a dead host in the list, and `localhost` with and without DNS balancing;
-    - cluster: 3/3 over the two TiDB nodes.
-- **`Acquire`:** one function for a pool, a connection, a pooled connection or a transaction;
-  `begin()` nests as a savepoint. Test: live `acquire_accepts_pools_connections_and_transactions`.
-- **Fixtures for `#[tisqlx::test]`:** `fixtures("a.sql", ...)` runs SQL files after the
-  migrations, in order. Tests: `tisqlx/tests/test_attr.rs` (`applies_fixtures_in_order`) and the
-  compile errors in `tests/ui/test_attr_errors.rs`.
-- **`Pool::transaction_retry_if` and `tisqlx::error::is_retryable`,** so retries work with
-  `anyhow` and other wrapping error types. Test: live `retry_with_a_foreign_error_type`.
-- **`#[tisqlx::test]` (with `migrations = "dir"`):** a throwaway database per test.
-  Tests: `tisqlx/tests/test_attr.rs`, plus `tests/ui/test_attr_errors.rs` for the compile errors.
-- **Types:**
-  - `i128`/`u128` for integral DECIMAL and integer columns;
-  - `&serde_json::value::RawValue`;
-  - `Box<T>`/`Arc<T>` for any bindable `T`.
-
-  Test: live `wide_integers_and_raw_json`.
+**Test infrastructure**
+- **Cluster tier** (`make db-cluster test-cluster`, see [TESTING.md](TESTING.md)): TiFlash
+  reads, DDL on one node with a cached statement on the other, stale reads returning old data,
+  and pessimistic lock-wait timeouts. The `resource-group` option and pool recovery after
+  `KILL` work standalone, so they are in the live tier.
+- **Skipped tests are visible:** every test that needs a database is `#[ignore]`d with the
+  `make` target that runs it.

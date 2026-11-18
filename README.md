@@ -61,7 +61,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 
 | crate | role |
 |---|---|
-| `tisqlx` | facade: re-exports and macros. Features: `macros`, `chrono`, `decimal` (all default) |
+| `tisqlx` | facade: re-exports and macros. Features: `macros`, `chrono`, `decimal` (the defaults), `time`, `bigdecimal`, `uuid` |
 | `tisqlx-core` | driver: wire protocol, auth, TLS, types, pool, transactions, TiDB features, migrations |
 | `tisqlx-macros` | `query!` family, `migrate!`, `#[derive(FromRow, Type)]`, `#[tisqlx::test]` (proc-macro crate, used through `tisqlx`) |
 | `tisqlx-cli` | `tisqlx` binary: `database`, `migrate`, `prepare` |
@@ -69,13 +69,22 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 ## Connection URL
 
 `tidb://user:pass@host:4000/db?ssl-mode=verify-identity&txn-mode=optimistic&resource-group=rg1`
-(`mysql://` is accepted too). Query keys: `ssl-mode` (`disabled|preferred|required|verify-ca|verify-identity`),
-`ssl-ca`, `statement-cache-capacity`, `timezone` (default `+00:00`), `txn-mode`,
-`resource-group`, `require-tidb`, `socket`, `connect-timeout`. Any other key is set as a
-session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
+(`mysql://` is accepted too; the user defaults to `root`, the host to `localhost`, the port to 4000).
 
-The driver refuses to connect to a server that isn't TiDB, or to TiDB older than 8.5, unless
-`require-tidb=false`.
+| query key | default | meaning |
+|---|---|---|
+| `ssl-mode` | `preferred` | `disabled`, `preferred`, `required`, `verify-ca` or `verify-identity` |
+| `ssl-ca` | webpki roots | PEM file of CA certificates for the two `verify-*` modes |
+| `socket` | | path of a Unix socket to use instead of TCP |
+| `connect-timeout` | `30` | seconds |
+| `timezone` | `+00:00` | session `time_zone`; `server` keeps the server's (see *Time zones* below) |
+| `txn-mode` | server's | `pessimistic` or `optimistic` |
+| `resource-group` | | TiDB resource group of the session |
+| `statement-cache-capacity` | `100` | prepared statements cached per connection; `0` disables the cache |
+| `require-tidb` | `true` | `false` also accepts TiDB older than 8.5 and servers that aren't TiDB |
+| `load-balance-dns` | `false` | see below |
+
+Any other key is set as a session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
 
 **Several TiDB servers.** List them in the URL (`tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`;
 hosts without a port use 4000) or with `ConnectOptions::hosts`.
@@ -165,7 +174,7 @@ Arguments accepted for each column type. `&T`, `Option<T>`, `Box<T>`, `Arc<T>` a
 |---|---|
 | `TINYINT`…`BIGINT` (incl. `UNSIGNED`), `BOOLEAN`, `DECIMAL`, `FLOAT`, `DOUBLE`, `BIT`, `YEAR`, and `LIMIT ?`/`OFFSET ?` | `i8`…`i128`, `u8`…`u128`, `f32`, `f64`, `bool`, `Decimal`, `BigDecimal` |
 | `CHAR`, `VARCHAR`, `TEXT`, `ENUM`, `SET`, `VECTOR` | `&str`, `String`, `Cow<str>`, `types::Set`, `types::Vector`, `uuid::fmt::Hyphenated`, derived enums, and JSON values (`serde_json::Value`, `Json<T>`, `&RawValue`) |
-| `BINARY`, `VARBINARY`, `BLOB` | `&[u8]`, `Vec<u8>`, `[u8; N]`, `Cow<[u8]>`, `uuid::Uuid`, and everything accepted for text |
+| `BINARY`, `VARBINARY`, `BLOB` | `&[u8]`, `Vec<u8>`, `[u8; N]`, `uuid::Uuid`, and the text types above (not the JSON values) |
 | `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue`, and text (it must be valid JSON) |
 | `DATE` | `chrono::NaiveDate`, `time::Date`, and the datetime types |
 | `DATETIME`, `TIMESTAMP` | `NaiveDateTime`, `DateTime<Utc \| FixedOffset \| Local>`, `time::PrimitiveDateTime`, `time::OffsetDateTime`, and the date types |
@@ -205,23 +214,23 @@ data is stale.
 | `TINYINT`..`BIGINT` (`UNSIGNED`) | `i8`..`i64` (`u8`..`u64`) | |
 | `BIT(n)`, `YEAR` | `u64`, `u16` | |
 | `FLOAT`, `DOUBLE` | `f32`, `f64` | |
-| `DECIMAL` | `Decimal` (up to ~28 digits), `BigDecimal` (any precision, up to TiDB's 65), `i128`/`u128` (integral values) | `decimal`, `bigdecimal` |
+| `DECIMAL` | `Decimal` (up to ~28 digits), `BigDecimal` (any precision, up to TiDB's 65), `i128`/`u128` (integral values), `f64` (rounded) | `decimal`, `bigdecimal` |
 | `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` | |
 | `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>` | |
 | `ENUM` | `String`, or a `#[derive(Type)]` enum | |
 | `SET` | `types::Set` (list of members), `String` | |
 | `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue` | |
-| `VECTOR` (TiDB 8.4+) | `types::Vector` (`Vec<f32>`) | |
+| `VECTOR` | `types::Vector` (`Vec<f32>`) | |
 | `DATE` | `chrono::NaiveDate`, `time::Date` | `chrono`, `time` |
 | `DATETIME` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` | `chrono`, `time` |
 | `TIMESTAMP` (or `DATETIME`) as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>`, `time::OffsetDateTime` | `chrono`, `time` |
-| `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0); `NaiveTime`/`time::Time` within a day | |
+| `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0); `NaiveTime`/`time::Time` within a day | `chrono`, `time` |
 | `BINARY(16)`, `CHAR(36)` | `uuid::Uuid` (bytes or text), `uuid::fmt::Hyphenated` (text) | `uuid` |
 
-Defaults: `macros`, `chrono`, `decimal`. The query macros infer chrono types when `chrono` is on,
-else `time`. They infer `Decimal`, or `BigDecimal` for columns wider than 28 digits when
-`bigdecimal` is on. `SET` columns become `types::Set`. UUIDs have no column type of their own, so
-use an override such as `` AS `id: Uuid` ``.
+The query macros infer chrono types when `chrono` is on, else `time`. They infer `Decimal`, or
+`BigDecimal` when `bigdecimal` is on and the column is wider than 28 digits (or `decimal` is
+off). `SET` columns become `types::Set`. UUID and VECTOR columns look like binary and text
+columns to the macros, so they need an override such as `` AS `id: Uuid` ``.
 
 **Time zones.** TiDB sends and receives DATETIME and TIMESTAMP values as wall times in the
 session `time_zone`. Naive types (`NaiveDateTime`, `PrimitiveDateTime`) are those wall times
@@ -272,26 +281,30 @@ returns. If the test panics, it is left in place so you can inspect it.
 
 ```sh
 cargo install --path tisqlx-cli
-tisqlx database setup                 # create DB + run migrations
+tisqlx database setup                 # create DB + run migrations (also: create, drop, reset)
 tisqlx migrate add -r create_users    # reversible migration
-tisqlx migrate run | revert [--all] | info
+tisqlx migrate run | revert [--all] | info        # run and revert take --dry-run
 tisqlx migrate repair 20260101000000 --applied   # after fixing a dirty migration by hand
 tisqlx migrate build-script           # build.rs so migrate!() picks up new files
 tisqlx prepare [--check]              # offline data for query! macros
 ```
 
+Every command that needs the database takes `-D <url>` or reads `DATABASE_URL` (a `.env` file
+works too). Migrations are read from `./migrations` unless `--source <dir>` says otherwise.
+
 ## Development
 
 ```sh
-make db-up     # dedicated test TiDB v8.5.8 on port 4100 (never a shared server)
+make db-up     # dedicated test TiDB v8.5.8 on port 4100 (never a shared server); needs tiup or docker
 make test      # unit + mock-protocol + live tests
 make ci        # lint, feature sets, tests, offline-data check
 ```
 
 `cargo test` alone works without a database: live tests skip, and the macros compile from the
-committed `.tisqlx/` data. See [TESTING.md](TESTING.md) for the test strategy. The live tests
-create `tisqlx_t_*` databases and two unprivileged accounts, `tisqlx_sha` and `tisqlx_nat`, on
-the test server. The `sqlx/` submodule is upstream sqlx, kept only as a reference.
+committed `.tisqlx/` data. See [TESTING.md](TESTING.md) for the test strategy and
+[TODO.md](TODO.md) for the known gaps. The live tests create the databases `tisqlx_t_*` and
+`tisqlx_macros`, and two unprivileged accounts, `tisqlx_sha` and `tisqlx_nat`, on the test
+server.
 
 [TiDB]: https://www.pingcap.com/tidb/
 [sqlx]: https://github.com/launchbadge/sqlx
