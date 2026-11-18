@@ -14,8 +14,13 @@ use opt::{Command, DatabaseCommand, MigrateCommand, Opt};
 
 #[tokio::main]
 async fn main() {
-    // Load .env before parsing so clap's `env = "DATABASE_URL"` sees it.
-    dotenvy::dotenv().ok();
+    // Before parsing, so clap's `env = "DATABASE_URL"` sees it. The nearest `.env` file of the
+    // current directory and its ancestors; variables already set win.
+    if let Err(e) = dotenvy::dotenv()
+        && !e.not_found()
+    {
+        eprintln!("warning: .env: {e}; the lines after it are ignored");
+    }
     let opt = Opt::parse();
     if let Err(e) = run(opt).await {
         eprintln!("error: {e:#}");

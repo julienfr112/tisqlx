@@ -55,8 +55,39 @@ fn migrate_add_without_database() {
     assert!(e.contains("must not contain"), "{e}");
 
     ok(tisqlx(&d, None, &["migrate", "build-script"]));
-    assert!(std::fs::read_to_string(d.join("build.rs")).unwrap().contains("rerun-if-changed=migrations"));
+    assert!(std::fs::read_to_string(d.join("build.rs")).unwrap().contains(r#"rerun-if-changed={}", "migrations""#));
     assert!(fail(tisqlx(&d, None, &["migrate", "build-script"])).contains("--force"));
+}
+
+/// The path is embedded in a `println!` literal: braces, quotes and backslashes are escaped.
+#[test]
+fn build_script_compiles_for_any_path() {
+    let d = temp_dir("build_script");
+    let source = r#"mig{0}"\x}"#;
+    ok(tisqlx(&d, None, &["migrate", "build-script", "--source", source]));
+    let out =
+        Command::new("rustc").current_dir(&d).args(["--edition", "2024", "build.rs", "-o", "build"]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new(d.join("build")).output().unwrap();
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("cargo:rerun-if-changed={source}\n"));
+}
+
+/// Like the macros: the nearest `.env` *file* is read (a directory of that name is skipped),
+/// and the real environment wins. A malformed line is reported, not silently the end of the file.
+#[test]
+fn dotenv_lookup() {
+    let d = temp_dir("dotenv");
+    let sub = d.join("sub");
+    std::fs::create_dir_all(sub.join(".env")).unwrap();
+    std::fs::write(d.join(".env"), "DATABASE_URL=tidb://root@127.0.0.1:1/from_dotenv\n").unwrap();
+    let e = fail(tisqlx(&sub, None, &["database", "create"]));
+    assert!(e.contains("failed to connect to 127.0.0.1:1"), "{e}");
+    let e = fail(tisqlx(&sub, Some("tidb://root@127.0.0.1:2/x"), &["database", "create"]));
+    assert!(e.contains("failed to connect to 127.0.0.1:2"), "{e}");
+
+    std::fs::write(d.join(".env"), "not a valid line\nDATABASE_URL=tidb://root@127.0.0.1:1/from_dotenv\n").unwrap();
+    let e = fail(tisqlx(&sub, None, &["database", "create"]));
+    assert!(e.contains("warning: ") && e.contains(".env") && e.contains("no database URL"), "{e}");
 }
 
 #[test]
