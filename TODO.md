@@ -94,6 +94,14 @@ were fixed by inspection only.
 - **`idle_timeout` and `min_connections` are enforced,** and idle connections are reused most
   recent first: live `maintenance_reaps_idle_connections_and_keeps_the_minimum`,
   `idle_connections_are_reused_most_recent_first`.
+- **`min_connections` is capped at `max_connections`.** The maintenance task used to open
+  connections above the maximum: live `maintenance_never_opens_more_than_max_connections`.
+- **Nested transactions inside a stale read are no-ops.** TiDB accepts `SAVEPOINT` there but
+  creates nothing, so the nested commit or rollback failed with 1305 and rolled the stale read
+  back: live `nesting_inside_a_stale_read`.
+- **Inexact decodes are errors.** A DECIMAL too wide for `Decimal` and a DOUBLE out of `f32`
+  range used to round or become infinity: live
+  `inexact_conversions_are_errors_in_both_protocols`.
 - **Pool pings only after `ping_after_idle`:** mock `recently_returned_connection_is_not_pinged`,
   live `recently_used_connection_killed_by_the_server_fails_once`.
 - **Migration bookkeeping holds up against the migration's own SQL.** The migrations table is
