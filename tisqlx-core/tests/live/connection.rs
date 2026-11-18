@@ -135,8 +135,8 @@ async fn large_packets() {
     assert_eq!(s.len(), n);
     let r = raw_sql("SELECT REPEAT('y', 17*1024*1024)").fetch_one(&mut conn).await.unwrap();
     assert_eq!(r.get::<&str, _>(0).len(), n);
-    // exactly one full frame + 0-length terminator
-    let blob = vec![7u8; 0xFF_FFFF - 30];
+    // 18 bytes of COM_STMT_EXECUTE header: exactly one full frame, then the empty terminator
+    let blob = vec![7u8; 0xFF_FFFF - 18];
     let len: i64 = query_scalar("SELECT LENGTH(?)").bind(&blob).fetch_one(&mut conn).await.unwrap();
     assert_eq!(len as usize, blob.len());
     let blob = vec![7u8; n];

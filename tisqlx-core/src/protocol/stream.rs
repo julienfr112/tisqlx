@@ -154,3 +154,25 @@ impl PacketStream {
         Ok(())
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn packets_are_split_and_joined_at_16mb() {
+        let (a, b) = tokio::net::UnixStream::pair().unwrap();
+        let (mut tx, mut rx) = (PacketStream::new(Socket::Unix(a)), PacketStream::new(Socket::Unix(b)));
+        for (len, frames) in
+            [(0, 1), (1, 1), (MAX_PAYLOAD - 1, 1), (MAX_PAYLOAD, 2), (MAX_PAYLOAD + 1, 2), (2 * MAX_PAYLOAD, 3)]
+        {
+            let payload: Vec<u8> = (0..len).map(|i| i as u8).collect();
+            tx.reset_seq();
+            rx.reset_seq();
+            let (sent, received) = tokio::join!(tx.send_packet(&payload), rx.recv_packet());
+            sent.unwrap();
+            assert!(received.unwrap() == payload, "{len} bytes");
+            assert_eq!((tx.seq, rx.seq), (frames, frames), "{len} bytes");
+        }
+    }
+}
