@@ -30,7 +30,7 @@ impl<T> DerefMut for Json<T> {
 }
 
 fn json_compatible(ty: &TypeInfo) -> bool {
-    ty.r#type == ColumnType::Json || ty.r#type.is_textual()
+    ty.r#type.is_textual()
 }
 
 fn encode_json<T: Serialize + ?Sized>(v: &T, buf: &mut Vec<u8>) -> Result<IsNull, BoxDynError> {

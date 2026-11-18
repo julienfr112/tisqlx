@@ -38,5 +38,11 @@ webpki-roots.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
+# The live suite covers every optional type: `make test` runs it with `--all-features`.
+[[test]]
+name = "live"
+path = "tests/live/main.rs"
+required-features = ["chrono", "decimal", "bigdecimal", "time", "uuid"]
+
 [lints]
 workspace = true

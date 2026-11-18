@@ -104,9 +104,9 @@ impl DateTimeParts {
         let p = Self::decode(value)?;
         if (p.hour, p.minute, p.second, p.micros) != (0, 0, 0, 0) {
             return Err(format!(
-                "the value has a time of day ({:02}:{:02}:{:02}), which a date type would drop; decode a \
+                "the value has a time of day ({:02}:{:02}:{:02}.{:06}), which a date type would drop; decode a \
                  datetime type, or select `DATE(column)`",
-                p.hour, p.minute, p.second
+                p.hour, p.minute, p.second, p.micros
             )
             .into());
         }

@@ -9,7 +9,7 @@
 //! | `FLOAT`, `DOUBLE` | `f32`, `f64` |
 //! | `DECIMAL` | `rust_decimal::Decimal` (`decimal`, ≤ 28 digits), `bigdecimal::BigDecimal` (`bigdecimal`, any precision), `i128`/`u128` (integral values), `f32`/`f64` (rounded) |
 //! | `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` |
-//! | `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>` |
+//! | `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>`, `Cow<[u8]>` (bind only) |
 //! | `ENUM` | `String`, or a `#[derive(Type)]` enum |
 //! | `SET` | [`Set`], `String` |
 //! | `JSON` | `serde_json::Value`, [`Json<T>`], `&serde_json::value::RawValue` |

@@ -196,7 +196,6 @@ async fn json_and_bytes_variants() {
 
 /// Optional and TiDB-specific types, through both protocols (prepared binds + binary
 /// rows, and text rows).
-#[cfg(all(feature = "time", feature = "uuid", feature = "bigdecimal"))]
 #[tokio::test]
 #[ignore = "needs a TiDB: run with `make test-live`"]
 async fn extended_types() {
@@ -335,7 +334,6 @@ async fn wide_integers_and_raw_json() {
 
 /// A NULL parameter still declares its Rust type's column type (`Option::<T>::None.produces()`);
 /// TiDB must ignore it for every pairing, in writes and in comparisons.
-#[cfg(all(feature = "chrono", feature = "time", feature = "decimal", feature = "bigdecimal", feature = "uuid"))]
 #[tokio::test]
 #[ignore = "needs a TiDB: run with `make test-live`"]
 async fn null_of_every_type_into_every_column() {
@@ -421,13 +419,13 @@ async fn inexact_conversions_are_errors_in_both_protocols() {
     let opts = fresh_db("inexact").await;
     let mut conn = opts.connect().await.unwrap();
     conn.execute_raw(
-        "CREATE TABLE t (f FLOAT, d DOUBLE, dm DECIMAL(40, 30));
-         INSERT INTO t VALUES (0.1, 1e300, 1.123456789012345678901234567891)",
+        "CREATE TABLE t (f FLOAT, d DOUBLE, dm DECIMAL(40, 30), short DECIMAL(40, 30));
+         INSERT INTO t VALUES (0.1, 1e300, 1.123456789012345678901234567891, 1.5)",
     )
     .await
     .unwrap();
     for prepared in [true, false] {
-        let sql = "SELECT f, d, dm FROM t";
+        let sql = "SELECT f, d, dm, short FROM t";
         let row =
             if prepared { query(sql).fetch_one(&mut conn).await } else { raw_sql(sql).fetch_one(&mut conn).await }
                 .unwrap();
@@ -438,6 +436,11 @@ async fn inexact_conversions_are_errors_in_both_protocols() {
         assert!(
             row.try_get::<rust_decimal::Decimal, _>("dm").is_err(),
             "prepared={prepared}: 31 digits must not be rounded to rust_decimal's 28"
+        );
+        assert_eq!(
+            row.get::<rust_decimal::Decimal, _>("short"),
+            rust_decimal::Decimal::new(15, 1),
+            "prepared={prepared}: the column's 30 decimals are zeros, not digits to round"
         );
     }
 }
@@ -452,14 +455,14 @@ async fn dates_from_datetimes_and_zero_dates_in_both_protocols() {
     let mut conn = opts.connect().await.unwrap();
     conn.execute_raw(
         "SET sql_mode = '';
-         CREATE TABLE t (noon DATETIME(6), midnight DATETIME, ts TIMESTAMP, zero_d DATE, zero_dt DATETIME);
-         INSERT INTO t VALUES ('2026-11-18 12:00:00.5', '2026-11-18 00:00:00', '2026-11-18 09:05:07', 0, 0)",
+         CREATE TABLE t (frac DATETIME(6), midnight DATETIME, ts TIMESTAMP, zero_d DATE, zero_dt DATETIME);
+         INSERT INTO t VALUES ('2026-11-18 00:00:00.5', '2026-11-18 00:00:00', '2026-11-18 09:05:07', 0, 0)",
     )
     .await
     .unwrap();
     let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
     for prepared in [true, false] {
-        let sql = "SELECT noon, midnight, ts, zero_d, zero_dt, DATE(noon) AS d FROM t";
+        let sql = "SELECT frac, midnight, ts, zero_d, zero_dt, DATE(frac) AS d FROM t";
         let row =
             if prepared { query(sql).fetch_one(&mut conn).await } else { raw_sql(sql).fetch_one(&mut conn).await }
                 .unwrap();
@@ -467,9 +470,10 @@ async fn dates_from_datetimes_and_zero_dates_in_both_protocols() {
         assert_eq!(row.get::<chrono::NaiveDate, _>("midnight"), day, "{p}");
         assert_eq!(row.get::<time::Date, _>("midnight").to_string(), "2026-11-18", "{p}");
         assert_eq!(row.get::<chrono::NaiveDate, _>("d"), day, "{p}");
-        for column in ["noon", "ts"] {
+        for column in ["frac", "ts"] {
             let e = row.try_get::<chrono::NaiveDate, _>(column).unwrap_err().to_string();
-            assert!(e.contains("time of day"), "{p} {column}: {e}");
+            let time = if column == "frac" { "00:00:00.500000" } else { "09:05:07.000000" };
+            assert!(e.contains("time of day") && e.contains(time), "{p} {column}: {e}");
             assert!(row.try_get::<time::Date, _>(column).is_err(), "{p} {column}");
             assert!(row.try_get::<Option<chrono::NaiveDate>, _>(column).is_err(), "{p} {column}");
         }
