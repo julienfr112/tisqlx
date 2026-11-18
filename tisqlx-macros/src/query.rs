@@ -171,7 +171,7 @@ pub fn expand(input: QueryInput, kind: Kind, source: Source) -> syn::Result<Toke
     }
 
     let mut columns = Vec::with_capacity(desc.columns.len());
-    for (i, col) in desc.columns.iter().enumerate() {
+    for col in &desc.columns {
         let (name, null, ty_override) = parse_override(col.name());
         let base = match ty_override.as_deref() {
             Some("_") if kind == Kind::As => None,
@@ -188,7 +188,7 @@ pub fn expand(input: QueryInput, kind: Kind, source: Source) -> syn::Result<Toke
         let nullable = match null {
             Nullability::NonNull => false,
             Nullability::Nullable => true,
-            Nullability::Inferred => !desc.columns[i].type_info.is_not_null(),
+            Nullability::Inferred => !col.type_info().is_not_null(),
         };
         let ty = base.map(|b| if nullable { quote!(::std::option::Option<#b>) } else { b });
         columns.push(ColumnSpec { name, ty, checked: ty_override.is_none() });
