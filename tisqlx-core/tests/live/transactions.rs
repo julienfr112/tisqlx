@@ -3,6 +3,7 @@ use tisqlx_core::*;
 use crate::common::*;
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn transactions_and_savepoints() {
     require_db!();
     let opts = fresh_db("tx").await;
@@ -46,6 +47,7 @@ async fn ids(conn: &mut TiConnection) -> Vec<i32> {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn abandoned_savepoints_roll_back_to_the_right_level() {
     require_db!();
     let opts = fresh_db("txnest").await;
@@ -103,6 +105,7 @@ async fn abandoned_savepoints_roll_back_to_the_right_level() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn begin_options_are_applied() {
     require_db!();
     let opts = fresh_db("txopts").await;

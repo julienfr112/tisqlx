@@ -17,6 +17,7 @@ macro_rules! require_cluster {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB cluster: run with `make test-cluster`"]
 async fn reads_from_tiflash() {
     let c = require_cluster!();
     let (a, _) = fresh_cluster_db("tiflash", &c).await;
@@ -54,6 +55,7 @@ async fn reads_from_tiflash() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB cluster: run with `make test-cluster`"]
 async fn ddl_on_another_node_invalidates_cached_statements() {
     let c = require_cluster!();
     let (a, b) = fresh_cluster_db("ddl2", &c).await;
@@ -71,6 +73,7 @@ async fn ddl_on_another_node_invalidates_cached_statements() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB cluster: run with `make test-cluster`"]
 async fn stale_reads_see_the_past() {
     let c = require_cluster!();
     let (a, _) = fresh_cluster_db("stale", &c).await;
@@ -98,6 +101,7 @@ async fn stale_reads_see_the_past() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB cluster: run with `make test-cluster`"]
 async fn pessimistic_lock_wait_timeout_is_retryable() {
     let c = require_cluster!();
     let (a, b) = fresh_cluster_db("locks", &c).await;

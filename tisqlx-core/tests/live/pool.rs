@@ -5,6 +5,7 @@ use tisqlx_core::*;
 use crate::common::*;
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn pool_and_retry_on_write_conflict() {
     require_db!();
     let opts = fresh_db("retry").await;
@@ -45,6 +46,7 @@ async fn pool_and_retry_on_write_conflict() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn pool_returns_dirty_connections_clean() {
     require_db!();
     let opts = fresh_db("pooldirty").await;
@@ -62,6 +64,7 @@ async fn pool_returns_dirty_connections_clean() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn pool_size_tracks_every_exit_path() {
     require_db!();
     let opts = fresh_db("poolsize").await;
@@ -110,6 +113,7 @@ async fn pool_size_tracks_every_exit_path() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn dropped_pessimistic_transaction_releases_its_locks() {
     require_db!();
     let opts = fresh_db("poollock").await;
@@ -131,6 +135,7 @@ async fn dropped_pessimistic_transaction_releases_its_locks() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn maintenance_reaps_idle_connections_and_keeps_the_minimum() {
     require_db!();
     let opts = fresh_db("poolmaint").await;
@@ -163,6 +168,7 @@ async fn maintenance_reaps_idle_connections_and_keeps_the_minimum() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn idle_connections_are_reused_most_recent_first() {
     require_db!();
     let opts = fresh_db("poollifo").await;
@@ -176,6 +182,7 @@ async fn idle_connections_are_reused_most_recent_first() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn retry_with_a_foreign_error_type() {
     require_db!();
     // An application error type wrapping tisqlx errors (like anyhow::Error would).
@@ -234,6 +241,7 @@ async fn retry_with_a_foreign_error_type() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn pool_recovers_from_connections_killed_by_the_server() {
     require_db!();
     let opts = fresh_db("poolkill").await;
@@ -250,6 +258,7 @@ async fn pool_recovers_from_connections_killed_by_the_server() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn recently_used_connection_killed_by_the_server_fails_once() {
     // With the default `ping_after_idle`, a connection returned moments ago is not pinged:
     // the first query on it fails, the pool discards it, and the next checkout is healthy.

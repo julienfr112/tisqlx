@@ -14,6 +14,7 @@ fn dir(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn run_rerun_mismatch_dirty_repair() {
     require_db!();
     let opts = fresh_db("mig1").await;
@@ -63,6 +64,7 @@ async fn run_rerun_mismatch_dirty_repair() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn reversible_and_concurrent() {
     require_db!();
     let opts = fresh_db("mig2").await;
@@ -93,6 +95,7 @@ async fn reversible_and_concurrent() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn repair_and_applied_edge_cases() {
     require_db!();
     let opts = fresh_db("mig3").await;
@@ -121,6 +124,7 @@ async fn repair_and_applied_edge_cases() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn cancelled_run_releases_the_migration_lock() {
     require_db!();
     let opts = fresh_db("mig4").await;
@@ -141,6 +145,7 @@ async fn cancelled_run_releases_the_migration_lock() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn migration_sql_cannot_break_the_bookkeeping() {
     require_db!();
     let opts = fresh_db("mig5").await;

@@ -39,7 +39,7 @@ db-cluster-down:
 # Tests that need PD/TiKV/TiFlash and two TiDB nodes (skipped by the other tiers).
 test-cluster:
 	TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_CLUSTER=$$(scripts/tidb.sh cluster-urls) TISQLX_TEST_REQUIRE_CLUSTER=1 \
-		cargo test -p tisqlx-core --all-features --test live cluster::
+		cargo test -p tisqlx-core --all-features --test live cluster:: -- --include-ignored
 
 fmt:
 	cargo fmt --all
@@ -54,10 +54,9 @@ test-unit:
 	cargo test -q -p tisqlx-macros-core --all-features --lib
 	cargo test -q -p tisqlx-macros-core --no-default-features --features time,bigdecimal --lib
 
-# Unit + live tests; fails if the test database is unreachable.
+# Unit + live tests (the `#[ignore]`d ones need the database); fails if it is unreachable.
 test-live test: macros-db
-	$(LIVE_ENV) cargo test --workspace --all-features
-	$(LIVE_ENV) cargo test -q -p tisqlx --all-features --test test_attr -- --include-ignored
+	$(LIVE_ENV) cargo test --workspace --all-features -- --include-ignored --skip cluster::
 	cargo test -q -p tisqlx-macros-core --all-features --lib
 	cargo test -q -p tisqlx-macros-core --no-default-features --features time,bigdecimal --lib
 
@@ -89,7 +88,7 @@ audit:
 	cargo audit
 
 coverage: macros-db
-	$(LIVE_ENV) cargo llvm-cov --workspace --all-features --html
+	$(LIVE_ENV) cargo llvm-cov --workspace --all-features --html -- --include-ignored --skip cluster::
 	@echo "report: target/llvm-cov/html/index.html"
 
 ci: lint features test-live prepare-check

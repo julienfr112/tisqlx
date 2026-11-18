@@ -5,6 +5,7 @@ use tisqlx_core::*;
 use crate::common::*;
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn tidb_features() {
     require_db!();
     let opts = fresh_db("tidbfeat").await;
@@ -55,6 +56,7 @@ async fn tidb_features() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn resource_group_option_binds_the_session() {
     require_db!();
     let mut admin = TiConnection::connect(&base_url()).await.unwrap();

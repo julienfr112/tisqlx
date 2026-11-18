@@ -68,6 +68,7 @@ struct Wrapper<T> {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn generated_code_is_hygienic() {
     let Some(pool) = pool().await else { return };
     // `Record` here is the user's type, not the macro's generated struct.
@@ -89,6 +90,7 @@ async fn generated_code_is_hygienic() {
 
 #[cfg(all(feature = "bigdecimal", feature = "uuid"))]
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn macro_type_mapping() {
     use tisqlx::types::{BigDecimal, Decimal, Set, Uuid};
     let Some(pool) = pool().await else { return };
@@ -123,6 +125,7 @@ async fn macro_type_mapping() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn query_macros() {
     let Some(pool) = pool().await else { return };
     let mut tx = pool.begin().await.unwrap();
@@ -264,6 +267,7 @@ fn by_name<T: tisqlx::Encode + Sync>(name: T) -> impl Sync {
 /// date, ...), not by exact Rust type. Compiling this is most of the test; the rejected cases
 /// are in `tests/ui-query/bind_types.rs`.
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn bind_arguments_of_compatible_types() {
     let Some(pool) = pool().await else { return };
     let mut tx = pool.begin().await.unwrap();

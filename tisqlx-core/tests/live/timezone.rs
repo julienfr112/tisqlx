@@ -25,6 +25,7 @@ async fn assert_now_is_correct(conn: &mut TiConnection) {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn instants_round_trip_in_a_non_utc_session() {
     require_db!();
     let opts = fresh_db("tz").await.timezone(Some("Europe/Paris"));
@@ -80,6 +81,7 @@ async fn instants_round_trip_in_a_non_utc_session() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn daylight_saving_wall_times_decode_to_the_instant_tidb_stores() {
     // Around DST changes a wall time can be ambiguous or not exist; whatever TiDB makes of it
     // (`UNIX_TIMESTAMP`), decoding must agree, for DATETIME values and stored TIMESTAMPs alike.
@@ -121,6 +123,7 @@ async fn daylight_saving_wall_times_decode_to_the_instant_tidb_stores() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn session_zone_follows_the_server_hooks_and_reloads() {
     require_db!();
     let opts = fresh_db("tzserver").await;

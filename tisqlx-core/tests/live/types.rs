@@ -3,6 +3,7 @@ use tisqlx_core::*;
 use crate::common::*;
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn types_roundtrip() {
     require_db!();
     let opts = fresh_db("types").await;
@@ -98,6 +99,7 @@ async fn types_roundtrip() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn describe_nullability() {
     require_db!();
     let opts = fresh_db("describe").await;
@@ -121,6 +123,7 @@ async fn describe_nullability() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn vector_columns() {
     require_db!();
     let opts = fresh_db("vector").await;
@@ -144,6 +147,7 @@ async fn vector_columns() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn json_and_bytes_variants() {
     require_db!();
     let opts = fresh_db("jsonbytes").await;
@@ -194,6 +198,7 @@ async fn json_and_bytes_variants() {
 /// rows, and text rows).
 #[cfg(all(feature = "time", feature = "uuid", feature = "bigdecimal"))]
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn extended_types() {
     use std::str::FromStr;
     use std::sync::Arc;
@@ -275,6 +280,7 @@ async fn extended_types() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn vector_type() {
     require_db!();
     let opts = fresh_db("vectortype").await;
@@ -297,6 +303,7 @@ async fn vector_type() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn wide_integers_and_raw_json() {
     require_db!();
     let opts = fresh_db("wideint").await;

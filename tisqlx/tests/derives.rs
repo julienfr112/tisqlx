@@ -75,6 +75,7 @@ fn derive_compile_errors() {
 /// Query macro errors need the queries described by a live database: run by
 /// `make test-live`, which compiles with `DATABASE_URL` set and `TISQLX_OFFLINE=false`.
 #[test]
+#[ignore = "needs DATABASE_URL and TISQLX_OFFLINE=false: run with `make test-live`"]
 fn query_compile_errors() {
     let online = std::env::var("DATABASE_URL").is_ok_and(|u| !u.is_empty())
         && std::env::var("TISQLX_OFFLINE").is_ok_and(|v| v == "false");

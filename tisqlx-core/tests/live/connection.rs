@@ -4,6 +4,7 @@ use tisqlx_core::*;
 use crate::common::*;
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn select_one_text_and_binary() {
     require_db!();
     let mut conn = TiConnection::connect(&base_url()).await.unwrap();
@@ -24,6 +25,7 @@ async fn select_one_text_and_binary() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn multi_statement_raw() {
     require_db!();
     let mut conn = TiConnection::connect(&base_url()).await.unwrap();
@@ -40,6 +42,7 @@ async fn multi_statement_raw() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn auth_caching_sha2_and_native() {
     require_db!();
     let o: ConnectOptions = base_url().parse().unwrap();
@@ -84,6 +87,7 @@ async fn auth_caching_sha2_and_native() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn errors_and_recovery() {
     require_db!();
     let mut conn = TiConnection::connect(&base_url()).await.unwrap();
@@ -107,6 +111,7 @@ async fn errors_and_recovery() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn statement_cache_eviction() {
     require_db!();
     let opts: ConnectOptions = base_url().parse::<ConnectOptions>().unwrap().statement_cache_capacity(3);
@@ -121,6 +126,7 @@ async fn statement_cache_eviction() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn large_packets() {
     require_db!();
     let mut conn = TiConnection::connect(&base_url()).await.unwrap();
@@ -141,6 +147,7 @@ async fn large_packets() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn cached_statement_survives_ddl() {
     require_db!();
     let opts = fresh_db("ddlcache").await;
@@ -153,6 +160,7 @@ async fn cached_statement_survives_ddl() {
 }
 
 #[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 async fn tls_config_is_built_per_options() {
     require_db!();
     let tls: ConnectOptions = base_url().parse::<ConnectOptions>().unwrap().ssl_mode(SslMode::Required);

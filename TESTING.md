@@ -9,13 +9,17 @@
 | **Derive compile tests** | nothing | `tisqlx/tests/derives.rs` checks that the derives generate impls for generic, borrowed and nested types; `tests/ui/*.rs` checks the derive compile errors (trybuild). | `make test-unit` |
 | **Live** | dedicated TiDB | `tisqlx-core/tests/live/`: every feature against a real server, one throwaway database per test. Covers auth over TLS, the Unix socket and plain TCP, all types in both protocols, transactions and abandoned savepoints, pool accounting and lock release, write-conflict retry, stale reads, migrations, and 17 MB packets. | `make test-live` |
 | **Macros (live)** | dedicated TiDB | `tisqlx/tests/macros.rs` compiles the `query!` family online and runs the queries. `tests/ui-query/*.rs` checks the query macro compile errors (bind count, bad column names, bad SQL, type mismatches). | `make test-live` |
-| **`#[tisqlx::test]`** | dedicated TiDB | `tisqlx/tests/test_attr.rs` uses the attribute itself: a database per test, migrations, `Result` returns. Without a database these show as *ignored*; `make test-live` runs them with `--include-ignored`. | `make test-live` |
+| **`#[tisqlx::test]`** | dedicated TiDB | `tisqlx/tests/test_attr.rs` uses the attribute itself: a database per test, migrations, `Result` returns. | `make test-live` |
 | **Cluster** | tiup playground | `tisqlx-core/tests/live/cluster.rs` needs a real cluster: TiFlash reads, DDL on one TiDB node while the other holds a cached statement, stale reads returning old data, and TiKV lock-wait timeouts. | `make db-cluster test-cluster` |
 | **CLI** | both tiers | `tisqlx-cli/tests/cli.rs` runs the real binary: `migrate add`/`build-script` without a DB, and a full lifecycle against TiDB (setup, dry runs, revert, dirty migration, repair). | `make test-unit` / `make test-live` |
 | **Offline data** | dedicated TiDB | `tisqlx prepare --check`: the committed `.tisqlx/` still matches the schema. | `make prepare-check` |
 
-Live tests **skip** unless `TISQLX_TEST_URL` is set, so `cargo test` works anywhere.
-`make test-live` and CI set `TISQLX_TEST_REQUIRE=1`, which turns a missing database into a failure.
+Every test that needs a database is `#[ignore]`d with the target that runs it, so a plain
+`cargo test` works anywhere and reports them as *ignored*, never as passed.
+- `make test-live` runs them with `--include-ignored` (skipping `cluster::`).
+- `make test-cluster` runs the cluster tests.
+- Those targets and CI also set `TISQLX_TEST_REQUIRE=1`, so an unreachable database fails the
+  run instead of skipping inside the tests.
 
 ## The test database
 

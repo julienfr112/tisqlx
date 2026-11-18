@@ -34,10 +34,6 @@ it is tested.
 
 ## Test infrastructure
 
-- [ ] **P2: Make skipped tests visible.** Without a database, `cargo test` reports skipped live
-  tests as passed. `TISQLX_TEST_REQUIRE=1` (and `TISQLX_TEST_REQUIRE_CLUSTER=1`) cover CI and
-  `make`.
-  *Option:* a summary line, or `#[ignore]` plus `--include-ignored` in the live targets.
 - [ ] **P3: Coverage gaps.**
   - `tls.rs`: `verify-ca` and a custom `ssl-ca` are untested. Test them with the CA that
     `auto-tls` generates.
@@ -180,6 +176,10 @@ found.
     `bind_check::tests`;
   - acceptance in `tisqlx/tests/macros.rs` (`bind_arguments_of_compatible_types`);
   - rejection in `tests/ui-query/bind_types.rs`.
+
+**Skipped tests are visible.** Every test that needs a database is `#[ignore]`d with the
+`make` target that runs it, so a plain `cargo test` reports them as ignored, not passed.
+`make test-live`/`test-cluster` pass `--include-ignored`.
 
 **Features**
 - **`Pool::transaction_retry_if` and `tisqlx::error::is_retryable`,** so retries work with
