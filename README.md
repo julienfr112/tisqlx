@@ -236,6 +236,11 @@ The query macros infer chrono types when `chrono` is on, else `time`. They infer
 off). `SET` columns become `types::Set`. UUID and VECTOR columns look like binary and text
 columns to the macros, so they need an override such as `` AS `id: Uuid` ``.
 
+**Decoding is exact.** A value the Rust type can't hold is an error, never rounded or cut: a
+`DECIMAL` too wide for `Decimal`, a `DOUBLE` out of `f32` range, or a `DATETIME` with a time
+of day read as a date type (use a datetime type or `DATE(col)`). The zero date `0000-00-00`
+(non-strict `sql_mode`) is an error for every date and datetime type, `Option<_>` included.
+
 **Time zones.** TiDB sends and receives DATETIME and TIMESTAMP values as wall times in the
 session `time_zone`. Naive types (`NaiveDateTime`, `PrimitiveDateTime`) are those wall times
 as they are. Instant types (`DateTime<…>`, `OffsetDateTime`) are converted from and to the
