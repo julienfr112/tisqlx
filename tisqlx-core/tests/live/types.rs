@@ -189,6 +189,9 @@ async fn json_and_bytes_variants() {
     let sql_null: Option<serde_json::Value> =
         query_scalar("SELECT CAST(NULL AS JSON)").fetch_one(&mut conn).await.unwrap();
     assert_eq!(sql_null, None);
+    let cow = std::borrow::Cow::Borrowed(&b"cow"[..]);
+    let echoed: Vec<u8> = query_scalar("SELECT ?").bind(cow).fetch_one(&mut conn).await.unwrap();
+    assert_eq!(echoed, b"cow");
 }
 
 /// Optional and TiDB-specific types, through both protocols (prepared binds + binary
@@ -408,4 +411,33 @@ async fn null_of_every_type_into_every_column() {
         time::Duration,
         std::time::Duration,
     );
+}
+
+/// A conversion that cannot be exact is an error, and FLOAT reads the same through both protocols.
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn inexact_conversions_are_errors_in_both_protocols() {
+    require_db!();
+    let opts = fresh_db("inexact").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw(
+        "CREATE TABLE t (f FLOAT, d DOUBLE, dm DECIMAL(40, 30));
+         INSERT INTO t VALUES (0.1, 1e300, 1.123456789012345678901234567891)",
+    )
+    .await
+    .unwrap();
+    for prepared in [true, false] {
+        let sql = "SELECT f, d, dm FROM t";
+        let row =
+            if prepared { query(sql).fetch_one(&mut conn).await } else { raw_sql(sql).fetch_one(&mut conn).await }
+                .unwrap();
+        assert_eq!(row.get::<f32, _>("f"), 0.1, "prepared={prepared}");
+        assert_eq!(row.get::<f64, _>("f"), 0.1f32 as f64, "prepared={prepared}: the stored FLOAT, widened");
+        assert!(row.try_get::<f32, _>("d").is_err(), "prepared={prepared}: 1e300 is not an f32");
+        assert_eq!(row.get::<f64, _>("dm"), 1.123_456_789_012_345_7, "prepared={prepared}");
+        assert!(
+            row.try_get::<rust_decimal::Decimal, _>("dm").is_err(),
+            "prepared={prepared}: 31 digits must not be rounded to rust_decimal's 28"
+        );
+    }
 }

@@ -20,7 +20,7 @@ impl Type for [u8] {
     }
 }
 
-forward_type!([u8] => Vec<u8>);
+forward_type!([u8] => Vec<u8>, std::borrow::Cow<'_, [u8]>);
 
 impl<const N: usize> Type for [u8; N] {
     fn type_info() -> TypeInfo {

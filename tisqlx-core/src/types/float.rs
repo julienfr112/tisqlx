@@ -11,14 +11,17 @@ fn float_compatible(ty: &TypeInfo) -> bool {
 
 fn decode_f64(value: &ValueRef<'_>) -> Result<f64, BoxDynError> {
     let b = value.as_bytes()?;
+    let ty = value.type_info.r#type;
     if value.format == RowFormat::Binary {
-        match value.type_info.r#type {
+        match ty {
             ColumnType::Float => return Ok(f32::from_le_bytes(b.try_into()?) as f64),
             ColumnType::Double => return Ok(f64::from_le_bytes(b.try_into()?)),
             _ => {}
         }
     }
-    Ok(std::str::from_utf8(b)?.trim().parse()?)
+    let text = std::str::from_utf8(b)?.trim();
+    // A FLOAT is read as the f32 it is, so that both protocols widen the same value to f64.
+    Ok(if ty == ColumnType::Float { text.parse::<f32>()? as f64 } else { text.parse()? })
 }
 
 impl Type for f32 {
@@ -63,6 +66,11 @@ impl<'r> Decode<'r> for f64 {
 
 impl<'r> Decode<'r> for f32 {
     fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(decode_f64(&value)? as f32)
+        let wide = decode_f64(&value)?;
+        let narrow = wide as f32;
+        if narrow.is_infinite() && wide.is_finite() {
+            return Err(format!("value {wide} out of range for f32").into());
+        }
+        Ok(narrow)
     }
 }

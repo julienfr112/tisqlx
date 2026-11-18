@@ -71,7 +71,7 @@ macro_rules! accept {
 }
 accept!(Numeric <- Number);
 accept!(Text <- Text, Json);
-accept!(Bytes <- Bytes, Text);
+accept!(Bytes <- Bytes, Text, Json);
 accept!(Json <- Json, Text);
 accept!(Date <- Date, DateTime);
 accept!(DateTime <- DateTime, Date);
@@ -208,6 +208,8 @@ mod tests {
         accept::<col::Text, _>((&&Probe::new("x")).class());
         accept::<col::Bytes, _>((&&Probe::new(&"x".to_owned())).class());
         accept::<col::Json, _>((&&Probe::new(&&*Box::<str>::from("{}"))).class());
+        // A binary column takes everything a text column does.
+        accept::<col::Bytes, _>((&&Probe::new(&serde_json::Value::Null)).class());
         // Not classified: accepted anywhere.
         accept::<col::Numeric, _>((&&Probe::new(&Mine)).class());
         accept::<col::Text, _>((&&Probe::new(&Some(Mine))).class());

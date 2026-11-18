@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use rust_decimal::Decimal;
 
 use crate::decode::Decode;
@@ -32,6 +30,7 @@ impl<'r> Decode<'r> for Decimal {
         if value.type_info.r#type.is_integer() {
             return Ok(Decimal::from_i128_with_scale(super::int::decode_int(&value)?, 0));
         }
-        Ok(Decimal::from_str(value.as_str()?.trim())?)
+        // Exact: `from_str` would round a value with more digits than `Decimal` holds.
+        Ok(Decimal::from_str_exact(value.as_str()?.trim())?)
     }
 }

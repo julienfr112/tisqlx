@@ -122,11 +122,14 @@ impl DateTimeParts {
         let bad = || format!("invalid date/time {s:?}");
         let (date, time) = s.trim().split_once(' ').unwrap_or((s.trim(), ""));
         let mut d = date.split('-');
-        let num = |it: &mut std::str::Split<'_, char>| -> Result<u32, BoxDynError> {
-            Ok(it.next().ok_or_else(bad)?.parse::<u32>().map_err(|_| bad())?)
+        let mut next = || d.next().ok_or_else(bad);
+        let (year, month, day) = (next()?.parse(), next()?.parse(), next()?.parse());
+        let mut p = Self {
+            year: year.map_err(|_| bad())?,
+            month: month.map_err(|_| bad())?,
+            day: day.map_err(|_| bad())?,
+            ..Self::default()
         };
-        let mut p =
-            Self { year: num(&mut d)? as u16, month: num(&mut d)? as u8, day: num(&mut d)? as u8, ..Self::default() };
         if !time.is_empty() {
             let t = TimeParts::parse(time)?;
             if t.negative || t.micros >= 86_400_000_000 {
@@ -250,6 +253,9 @@ mod tests {
         assert!(DateTimeParts::parse("2026-01").is_err());
         assert!(DateTimeParts::parse("2026-01-02 25:00:00").is_err());
         assert!(DateTimeParts::date(10_000, 1, 1).is_err());
+        // Not truncated to year 1 / month 1.
+        assert!(DateTimeParts::parse("65537-01-02").is_err());
+        assert!(DateTimeParts::parse("2026-257-02").is_err());
     }
 
     #[test]
@@ -264,7 +270,6 @@ mod tests {
         }
         assert!(TimeParts::parse("1:60:00").is_err());
         assert!(TimeParts::parse("1:00:00.1234567").is_err());
-        // Overflowed (debug: panicked; release: wrapped to a wrong value) before.
         assert!(TimeParts::parse("99999999999999:00:00").is_err());
     }
 }
