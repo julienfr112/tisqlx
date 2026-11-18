@@ -17,6 +17,16 @@ it is tested.
 - [ ] **P3: A cancelled run on a borrowed connection keeps the migration lock until reused.**
   Pooled connections release it on return. A `&mut TiConnection` releases it at the next
   migrator call on that connection, or when the connection closes.
+- [ ] **P3: Session variables set by a migration stay on the connection.** After each
+  migration the migrator goes back to the original database, but a `SET sql_mode = …` (or any
+  other session variable) reaches the next migrations, and the caller or the pool afterwards.
+- [ ] **P3: A top-level `commit()` succeeds after the server ended the transaction.** After an
+  implicit commit (DDL) or a raw `ROLLBACK`, only nested levels report it. The top-level
+  `COMMIT` has nothing left to commit, and returns `Ok`.
+- [ ] **P3: A database change the driver can't see leaves cached statements on the old
+  database.** Only a statement that starts with `USE` empties the statement cache. A `USE`
+  after a `--` or `#` comment, for example, is not seen.
+  *Workaround:* `TiConnection::clear_cached_statements()`.
 
 ## Macros and offline data
 
@@ -30,6 +40,10 @@ it is tested.
   *Fix:* support `#[tisqlx(crate = "...")]` or use `proc-macro-crate`.
 - [ ] **P3: Indirect macro users go undetected by `tisqlx prepare`.** Workspace members that use
   the macros only through a crate that re-exports them are not detected or cleaned.
+- [ ] **P3: The CLI and the macros look up `.env` differently.** Both read the nearest `.env`
+  file, but the CLI starts from the current directory and the macros from the crate's
+  manifest directory. On a malformed line the CLI warns and ignores the rest of the file; the
+  macros skip the line. `#[tisqlx::test]` reads no `.env` at run time.
 
 ## Test infrastructure
 
@@ -87,13 +101,15 @@ were fixed by inspection only.
   `unknown_column_type_is_read_as_a_string`.
 - **Cached statements follow the current database.** TiDB binds a prepared statement to the
   database current when it was prepared, so a statement starting with `USE` empties the cache:
-  live `cached_statement_follows_the_current_database`. A database change the driver can't see
-  in the SQL (e.g. inside a stored `PREPARE`) is not covered.
+  live `cached_statement_follows_the_current_database`. An index hint (`USE INDEX`) doesn't:
+  unit `use_statements_are_spotted`.
 - **A database name with a backtick connects.** TiDB builds its own `USE` from the handshake
   without escaping, so the driver selects such a database itself: live
   `database_name_with_a_backtick`.
 - **An implicit commit (DDL) is reported at nested levels** instead of error 1305: live
   `ddl_inside_a_nested_transaction`.
+- **`rows_affected()` counts matched rows** (`CLIENT_FOUND_ROWS`): live
+  `rows_affected_counts_matched_rows`.
 - **`clear_cached_statements` closes the statements at once:** mock
   `clearing_the_statement_cache_closes_the_statements_at_once`.
 - **A failed `ROLLBACK TO SAVEPOINT` rolls back the whole transaction,** and the outer
@@ -121,7 +137,12 @@ were fixed by inspection only.
   back: live `nesting_inside_a_stale_read`.
 - **Inexact decodes are errors.** A DECIMAL too wide for `Decimal` and a DOUBLE out of `f32`
   range used to round or become infinity: live
-  `inexact_conversions_are_errors_in_both_protocols`.
+  `inexact_conversions_are_errors_in_both_protocols`. A date type no longer drops a
+  DATETIME's time of day, and the zero date is an error, not `None`: live
+  `dates_from_datetimes_and_zero_dates_in_both_protocols`.
+- **Configuration mistakes are configuration errors:** mock
+  `zero_connect_timeout_is_a_configuration_error`, `no_hosts_is_a_configuration_error`,
+  `empty_session_variable_name_is_a_configuration_error`.
 - **Pool pings only after `ping_after_idle`:** mock `recently_returned_connection_is_not_pinged`,
   live `recently_used_connection_killed_by_the_server_fails_once`.
 - **Migration bookkeeping holds up against the migration's own SQL.** The migrations table is
@@ -152,9 +173,17 @@ were fixed by inspection only.
   (`bind_arguments_of_compatible_types`), rejection in `tests/ui-query/bind_types.rs`.
   Unsuffixed numeric literals are classified from the syntax, since their type is still being
   inferred when the check runs.
+- **A `LIKE` pattern is checked only against text and binary columns,** and a statement with
+  an executable comment is not analysed: unit `like_patterns_are_told_apart_from_values`,
+  `executable_comments_disable_the_analysis`.
 - **Unaliased expression names are not parsed as overrides** (`DATE_FORMAT(c, '%H:%i')`), and
   **a directory named `.env` no longer hangs the build:** unit `query::tests::overrides`,
   `describe::tests::a_directory_named_dotenv_is_skipped`.
+- **The derives reject attributes they would ignore,** and `rename_all` keeps an acronym as
+  one word: `tests/ui/from_row_rename.rs`, `tests/ui/type_derive_errors.rs`, unit
+  `acronyms_are_one_word`.
+- **The CLI reports a malformed `.env`,** and `migrate build-script` escapes any path:
+  `tisqlx-cli/tests/cli.rs` (`dotenv_lookup`, `build_script_compiles_for_any_path`).
 - **`tisqlx prepare` honours `-p`/`--package` and `--manifest-path`.** `--workspace` and
   `--all-targets` may be passed again, and with `-p`/`--exclude` the other packages' files are
   kept and not reported stale: unit tests in `prepare.rs`. A relative `--manifest-path` works
