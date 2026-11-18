@@ -302,8 +302,8 @@ struct UserId(i64);                       // encodes and decodes as its field
   stored as text (`VARCHAR` or `ENUM`). Variants take `rename = "value"`.
 - **`rename_all`** takes `lowercase`, `UPPERCASE`, `snake_case`, `SCREAMING_SNAKE_CASE`,
   `kebab-case`, `camelCase` or `PascalCase`. An acronym is one word: `HTTPServer` becomes
-  `http_server`.
-- **Compile errors:** an unknown attribute; `rename` on a tuple field or next to `skip` or
+  `http_server`. It applies to `FromRow` structs with named fields and to `Type` enums.
+- **Compile errors:** an unknown attribute; `rename_all` anywhere else; `rename` on a tuple field or next to `skip` or
   `flatten`; more than one of `skip`, `flatten`, `try_from` and `json`; `default` with
   anything but `json`; `Type` on a generic enum.
 

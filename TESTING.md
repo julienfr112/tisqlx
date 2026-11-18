@@ -15,7 +15,8 @@
 | **Offline data** | dedicated TiDB | `tisqlx prepare --check`: the committed `.tisqlx/` still matches the schema. | `make prepare-check` |
 
 Every test that needs a database is `#[ignore]`d with the target that runs it, so a plain
-`cargo test` works anywhere and reports them as *ignored*, never as passed.
+`cargo test` works anywhere and reports them as *ignored*, never as passed. The live target of
+`tisqlx-core` needs every optional type, so it is built only with `--all-features`.
 - `make test-live` runs them with `--include-ignored` (skipping `cluster::`).
 - `make test-cluster` runs the cluster tests. They read `TISQLX_TEST_CLUSTER` (the URLs of the
   two TiDB nodes), not `TISQLX_TEST_URL`.
