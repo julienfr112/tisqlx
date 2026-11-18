@@ -334,9 +334,9 @@ async fn failed_savepoint_rollback_aborts_the_whole_transaction() {
     let mut tx = conn.begin().await.unwrap();
     let sp = tx.begin().await.unwrap();
     let e = sp.rollback().await.unwrap_err();
-    assert_eq!(e.as_database_error().map(|d| d.code()), Some(1305));
+    assert_eq!(e.as_database_error().map(|d| d.code), Some(1305));
     let e = tx.commit().await.unwrap_err();
-    assert!(e.to_string().contains("already rolled back"), "{e}");
+    assert!(e.to_string().contains("no longer open"), "{e}");
     assert!(!conn.in_transaction());
     drop(conn);
     mock.finish().await;
@@ -544,6 +544,48 @@ async fn non_network_errors_do_not_fail_over() {
     let tried = tokio::time::timeout(Duration::from_millis(200), next.accept()).await;
     assert!(tried.is_err(), "the second host must not be contacted");
     denied.finish().await;
+}
+
+#[tokio::test]
+async fn full_server_fails_over() {
+    // TiDB at its connection limit answers the connection with error 1040 instead of a handshake.
+    let full = Mock::start(|mut c: Conn| async move { c.err(1040, "Too many connections").await }).await;
+    let live = Mock::start(serve_until_closed).await;
+    let conn = options(vec![addr_of(&full.url), addr_of(&live.url)]).connect().await.unwrap();
+    assert_eq!(conn.server_addr().unwrap().port(), addr_of(&live.url).1);
+    conn.close().await.unwrap();
+    full.finish().await;
+    live.finish().await;
+}
+
+#[tokio::test]
+async fn zero_connect_timeout_is_a_configuration_error() {
+    let live = Mock::start(|_| async {}).await;
+    let err = options(vec![addr_of(&live.url)]).connect_timeout(Duration::ZERO).connect().await.unwrap_err();
+    assert!(matches!(err, Error::Configuration(_)), "{err}");
+}
+
+#[tokio::test]
+async fn clearing_the_statement_cache_closes_the_statements_at_once() {
+    let mock = Mock::start(|mut c: Conn| async move {
+        c.accept().await;
+        c.expect(PREPARE, Some("SELECT ?")).await;
+        c.prepare_ok(5, 1, &[("v", LONGLONG, 0)]).await;
+        c.expect(EXECUTE, None).await;
+        c.columns(&[("v", LONGLONG, 0)]).await;
+        c.binary_row_i64(&[1]).await;
+        c.end_rows(AUTOCOMMIT).await;
+        assert_eq!(stmt_id(&c.expect(CLOSE, None).await), 5);
+    })
+    .await;
+    let mut conn = TiConnection::connect(&mock.url).await.unwrap();
+    let v: i64 = query_scalar("SELECT ?").bind(1i64).fetch_one(&mut conn).await.unwrap();
+    assert_eq!((v, conn.cached_statements_size()), (1, 1));
+    conn.clear_cached_statements().await.unwrap();
+    assert_eq!(conn.cached_statements_size(), 0);
+    // The server gets the close without waiting for another command.
+    tokio::time::timeout(Duration::from_secs(2), mock.finish()).await.expect("STMT_CLOSE was not sent");
+    assert!(!conn.is_broken());
 }
 
 #[tokio::test]

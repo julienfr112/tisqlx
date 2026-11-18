@@ -44,7 +44,7 @@ impl<'c> Executor<'c> for &'c mut TiConnection {
     where
         'c: 'e,
     {
-        self.run(sql, args, persistent)
+        run_on(self, sql, args, persistent)
     }
 
     fn describe<'e, 'q: 'e>(self, sql: &'q str) -> BoxFuture<'e, Result<Describe>>

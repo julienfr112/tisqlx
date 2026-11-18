@@ -31,6 +31,8 @@ pub struct QueryResult {
 }
 
 impl QueryResult {
+    /// Rows the statement matched. An `UPDATE` counts every row its `WHERE` matched, even one
+    /// whose values did not change (tisqlx sets `CLIENT_FOUND_ROWS`).
     pub fn rows_affected(&self) -> u64 {
         self.rows_affected
     }
@@ -164,6 +166,7 @@ impl TiConnection {
     /// [`ConnectOptions::hosts`]).
     pub async fn connect_with(options: &ConnectOptions) -> Result<Self> {
         if options.socket.is_some() {
+            check_connect_timeout(options)?;
             return tokio::time::timeout(options.connect_timeout, Self::establish(options, None))
                 .await
                 .map_err(|_| timed_out())?;
@@ -177,8 +180,9 @@ impl TiConnection {
     }
 
     /// Try `targets` in order until one connects; each attempt gets an even share of
-    /// `connect_timeout` (the last one, whatever is left). Only network errors move on to the
-    /// next target: anything else (bad password, not TiDB...) would fail on every one of them.
+    /// `connect_timeout` (the last one, whatever is left). Only network errors and a server
+    /// that is full (1040) move on to the next target: anything else (bad password, not
+    /// TiDB...) would fail on every one of them.
     /// `report(i, ok)` is called after each attempt. Returns the connection and its target index.
     pub(crate) async fn connect_any(
         options: &ConnectOptions,
@@ -188,6 +192,7 @@ impl TiConnection {
         if targets.is_empty() {
             return Err(Error::config("no host to connect to"));
         }
+        check_connect_timeout(options)?;
         let deadline = tokio::time::Instant::now() + options.connect_timeout;
         let share = options.connect_timeout / targets.len() as u32;
         let mut last = None;
@@ -202,8 +207,8 @@ impl TiConnection {
                     report(i, true);
                     return Ok((conn, i));
                 }
-                Ok(Err(e)) if !matches!(e, Error::Io(_)) => return Err(e),
-                Ok(Err(e)) => e,
+                Ok(Err(e)) if is_host_specific(&e) => e,
+                Ok(Err(e)) => return Err(e),
                 Err(_) => timed_out(),
             };
             if targets.len() > 1 {
@@ -264,7 +269,10 @@ impl TiConnection {
             | caps::PLUGIN_AUTH_LENENC_DATA
             | caps::CONNECT_ATTRS
             | caps::DEPRECATE_EOF;
-        if options.database.is_some() {
+        // TiDB (8.5) builds a `USE` statement from the handshake's database without escaping
+        // backticks, and fails with a syntax error: such a name is selected after connecting.
+        let handshake_db = options.database.as_deref().filter(|db| !db.contains('`'));
+        if handshake_db.is_some() {
             capabilities |= caps::CONNECT_WITH_DB;
         }
         capabilities &= handshake.capabilities;
@@ -298,7 +306,7 @@ impl TiConnection {
                 capabilities,
                 &options.username,
                 &response,
-                options.database.as_deref(),
+                handshake_db,
                 plugin.name(),
             ))
             .await?;
@@ -384,6 +392,9 @@ impl TiConnection {
             sets.push(format!("SESSION {name} = {v}"));
         }
         let mut sql = format!("SET {}", sets.join(", "));
+        if let Some(db) = options.database.as_deref().filter(|db| db.contains('`')) {
+            sql.push_str(&format!("; USE {}", quote_ident(db)));
+        }
         if let Some(group) = &options.resource_group {
             sql.push_str(&format!("; SET RESOURCE GROUP {}", quote_ident(group)));
         }
@@ -464,11 +475,16 @@ impl TiConnection {
         crate::query::raw_sql(sql).execute(self).await
     }
 
-    /// Clear the prepared-statement cache (closing every statement server-side).
+    /// Clear the prepared-statement cache, closing every statement on the server.
     pub async fn clear_cached_statements(&mut self) -> Result<()> {
         let ids: Vec<u32> = self.cache.map.drain().map(|(_, (s, _))| s.id).collect();
         self.pending_close.extend(ids);
-        self.wait_until_ready().await
+        self.wait_until_ready().await?;
+        // The closes are only buffered so far. Broken while flushing, as for any write.
+        self.phase = Phase::Broken;
+        self.stream.flush().await?;
+        self.phase = Phase::Idle;
+        Ok(())
     }
 
     pub fn cached_statements_size(&self) -> usize {
@@ -551,6 +567,9 @@ impl TiConnection {
         if level > 1 && !self.savepoints {
             return Ok(());
         }
+        if level > 1 && !self.in_transaction() {
+            return Err(self.transaction_ended_by_server());
+        }
         match self.execute_text(&crate::transaction::rollback_sql(level)).await {
             Err(e @ Error::Database(_)) if level > 1 => {
                 self.transaction_depth = 0;
@@ -559,6 +578,16 @@ impl TiConnection {
             }
             other => other,
         }
+    }
+
+    /// The error of a nested level that finds no transaction open on the server, so its
+    /// savepoint is gone. Every level is forgotten.
+    pub(crate) fn transaction_ended_by_server(&mut self) -> Error {
+        self.transaction_depth = 0;
+        Error::protocol(
+            "the server already ended the transaction: a DDL statement commits it implicitly, \
+             with everything before it",
+        )
     }
 
     /// Give up on this connection: the session is in a state tisqlx cannot restore.
@@ -787,22 +816,10 @@ impl TiConnection {
         }
         self.command(&p).await
     }
-
-    /// Execute `sql`, streaming every result set.
-    ///
-    /// With `args`, the statement goes through the binary (prepared) protocol;
-    /// without, through the text protocol.
-    pub(crate) fn run<'e>(
-        &'e mut self,
-        sql: impl Into<Cow<'e, str>>,
-        args: Option<Arguments>,
-        persistent: bool,
-    ) -> BoxStream<'e, Result<Step>> {
-        run_on(self, sql.into(), args, persistent)
-    }
 }
 
-/// Stream the results of `sql` on any owned or borrowed connection.
+/// Stream every result set of `sql` on an owned or borrowed connection. With `args`, the
+/// statement goes through the binary (prepared) protocol; without, through the text protocol.
 pub(crate) fn run_on<'e, C>(
     conn: C,
     sql: Cow<'e, str>,
@@ -949,6 +966,22 @@ impl fmt::Display for Target {
             None => write!(f, "{}:{}", self.host, self.port),
         }
     }
+}
+
+/// Whether a connect error is about that server only, so the next one is worth trying.
+fn is_host_specific(e: &Error) -> bool {
+    match e {
+        Error::Io(_) => true,
+        Error::Database(e) => e.code == crate::error::codes::TOO_MANY_CONNECTIONS,
+        _ => false,
+    }
+}
+
+fn check_connect_timeout(options: &ConnectOptions) -> Result<()> {
+    if options.connect_timeout.is_zero() {
+        return Err(Error::config("connect_timeout must not be zero"));
+    }
+    Ok(())
 }
 
 fn timed_out() -> Error {

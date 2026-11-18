@@ -167,6 +167,46 @@ async fn nesting_inside_a_stale_read() {
     assert_eq!(count(&mut conn).await, 1);
 }
 
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn ddl_inside_a_nested_transaction() {
+    // DDL commits the transaction implicitly, and its savepoints go with it.
+    require_db!();
+    let opts = fresh_db("txddl").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw("CREATE TABLE t (id INT PRIMARY KEY)").await.unwrap();
+
+    let mut tx = conn.begin().await.unwrap();
+    query("INSERT INTO t VALUES (1)").execute(&mut *tx).await.unwrap();
+    let mut nested = tx.begin().await.unwrap();
+    query("INSERT INTO t VALUES (2)").execute(&mut *nested).await.unwrap();
+    nested.execute_raw("CREATE TABLE u (id INT PRIMARY KEY)").await.unwrap();
+    assert!(!nested.in_transaction());
+    query("INSERT INTO t VALUES (3)").execute(&mut *nested).await.unwrap();
+    // the savepoint is gone: a clear error instead of 1305 "SAVEPOINT does not exist"
+    let e = nested.commit().await.unwrap_err();
+    assert!(e.to_string().contains("already ended the transaction"), "{e}");
+    let e = tx.commit().await.unwrap_err();
+    assert!(e.to_string().contains("no longer open"), "{e}");
+    assert_eq!(count(&mut conn).await, 3, "everything was committed");
+
+    // a nested rollback can no longer undo anything, and says so
+    let mut tx = conn.begin().await.unwrap();
+    let mut nested = tx.begin().await.unwrap();
+    query("INSERT INTO t VALUES (4)").execute(&mut *nested).await.unwrap();
+    nested.execute_raw("DROP TABLE u").await.unwrap();
+    let e = nested.rollback().await.unwrap_err();
+    assert!(e.to_string().contains("already ended the transaction"), "{e}");
+    let e = tx.commit().await.unwrap_err();
+    assert!(e.to_string().contains("no longer open"), "{e}");
+    assert_eq!(count(&mut conn).await, 4);
+    // the connection is in a clean state
+    let mut tx = conn.begin().await.unwrap();
+    query("INSERT INTO t VALUES (5)").execute(&mut *tx).await.unwrap();
+    tx.rollback().await.unwrap();
+    assert_eq!(count(&mut conn).await, 4);
+}
+
 /// Written once, callable with a pool, a connection, a pooled connection or a transaction.
 async fn add_user<'c>(db: impl Acquire<'c>, name: &str) -> Result<()> {
     let mut tx = db.begin().await?;

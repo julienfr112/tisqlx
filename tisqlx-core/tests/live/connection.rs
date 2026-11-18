@@ -82,7 +82,7 @@ async fn auth_caching_sha2_and_native() {
     for user in ["tisqlx_sha", "tisqlx_nat"] {
         let bad =
             TiConnection::connect_with(&o.clone().username(user).password("nope").ssl_mode(SslMode::Required)).await;
-        assert_eq!(bad.unwrap_err().as_database_error().map(|d| d.code()), Some(1045));
+        assert_eq!(bad.unwrap_err().as_database_error().map(|d| d.code), Some(1045));
     }
 }
 
@@ -92,7 +92,7 @@ async fn errors_and_recovery() {
     require_db!();
     let mut conn = TiConnection::connect(&base_url()).await.unwrap();
     let e = query("SELECT * FROM no_such_table_xyz").fetch_all(&mut conn).await.unwrap_err();
-    assert!(matches!(e.as_database_error().unwrap().code(), 1046 | 1146), "{e}");
+    assert!(matches!(e.as_database_error().unwrap().code, 1046 | 1146), "{e}");
     // Wrong param count.
     assert!(query("SELECT ?").fetch_all(&mut conn).await.is_err());
     // Connection still usable.
@@ -182,4 +182,34 @@ async fn tls_config_is_built_per_options() {
     assert!(matches!(strict.connect().await, Err(Error::Tls(_))));
     // ... while the original still connects
     tls.connect().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn database_name_with_a_backtick() {
+    require_db!();
+    let mut admin = TiConnection::connect(&base_url()).await.unwrap();
+    admin
+        .execute_raw("DROP DATABASE IF EXISTS `tisqlx_t_back``tick`; CREATE DATABASE `tisqlx_t_back``tick`")
+        .await
+        .unwrap();
+    let opts = base_url().parse::<ConnectOptions>().unwrap().database("tisqlx_t_back`tick");
+    let mut conn = opts.connect().await.unwrap();
+    let db: String = query_scalar("SELECT DATABASE()").fetch_one(&mut conn).await.unwrap();
+    assert_eq!(db, "tisqlx_t_back`tick");
+    admin.execute_raw("DROP DATABASE `tisqlx_t_back``tick`").await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn rows_affected_counts_matched_rows() {
+    require_db!();
+    let opts = fresh_db("foundrows").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw("CREATE TABLE t (id INT PRIMARY KEY, v INT); INSERT INTO t VALUES (1, 1), (2, 2)").await.unwrap();
+    // one row changes, both match
+    let r = query("UPDATE t SET v = ? WHERE id > 0").bind(1).execute(&mut conn).await.unwrap();
+    assert_eq!(r.rows_affected(), 2);
+    let r = conn.execute_raw("UPDATE t SET v = 1").await.unwrap();
+    assert_eq!(r.rows_affected(), 2);
 }

@@ -40,6 +40,11 @@ impl DerefMut for MaybePoolConnection<'_> {
 /// Nesting inside a stale read sends nothing: such a transaction is read-only and TiDB has
 /// no savepoints in it.
 ///
+/// A DDL statement commits the transaction implicitly, as in MySQL: what ran before it is
+/// committed, and what runs after it is committed statement by statement. The savepoints
+/// are gone too, so committing or rolling back a nested level then fails with an error that
+/// says so, and so does the commit of the levels around it.
+///
 /// Dropping it without calling [`commit`](Self::commit) rolls it back: the
 /// rollback is sent before the connection's next use (or before a pooled
 /// connection is reused).
@@ -105,9 +110,13 @@ impl<'c> Transaction<'c> {
     pub async fn commit(mut self) -> Result<()> {
         self.conn.wait_until_ready().await?;
         if self.conn.transaction_depth < self.depth {
-            // An inner rollback failed and took this level down with it.
+            // A nested level failed to roll back, or found the transaction gone.
             self.open = false;
-            return Err(Error::protocol("the transaction was already rolled back; nothing was committed"));
+            return Err(Error::protocol("the transaction is no longer open: a nested level already ended it"));
+        }
+        if self.depth > 1 && self.conn.savepoints && !self.conn.in_transaction() {
+            self.open = false;
+            return Err(self.conn.transaction_ended_by_server());
         }
         if self.depth == 1 || self.conn.savepoints {
             self.conn.execute_raw(&commit_sql(self.depth)).await?;

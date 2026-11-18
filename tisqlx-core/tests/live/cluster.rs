@@ -114,7 +114,7 @@ async fn pessimistic_lock_wait_timeout_is_retryable() {
     waiter.execute_raw("SET SESSION innodb_lock_wait_timeout = 1").await.unwrap();
     let mut wtx = waiter.begin_with(&TxnOptions::pessimistic()).await.unwrap();
     let err = query("UPDATE t SET v = 1 WHERE id = 1").execute(&mut *wtx).await.unwrap_err();
-    assert_eq!(err.as_database_error().map(|d| d.code()), Some(1205), "{err}");
+    assert_eq!(err.as_database_error().map(|d| d.code), Some(1205), "{err}");
     assert!(err.is_retryable());
     drop(wtx);
     tx.commit().await.unwrap();

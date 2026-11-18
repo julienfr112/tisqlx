@@ -112,6 +112,8 @@ pub fn is_retryable(error: &(dyn std::error::Error + 'static)) -> bool {
 
 /// TiDB/MySQL error codes with a special meaning to tisqlx.
 pub mod codes {
+    /// The server is at its connection limit.
+    pub const TOO_MANY_CONNECTIONS: u16 = 1040;
     pub const DUP_ENTRY: u16 = 1062;
     pub const NO_REFERENCED_ROW: u16 = 1452;
     pub const ROW_IS_REFERENCED: u16 = 1451;
@@ -154,18 +156,6 @@ pub struct DatabaseError {
 }
 
 impl DatabaseError {
-    pub fn code(&self) -> u16 {
-        self.code
-    }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    pub fn sql_state(&self) -> Option<&str> {
-        self.sql_state.as_deref()
-    }
-
     pub fn is_retryable(&self) -> bool {
         codes::RETRYABLE.contains(&self.code) || self.sql_state.as_deref() == Some("40001")
     }

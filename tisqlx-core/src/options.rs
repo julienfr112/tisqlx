@@ -136,8 +136,9 @@ impl ConnectOptions {
     /// A [`Pool`](crate::Pool) opens each new connection on the reachable host with the fewest
     /// of its connections, and skips a host that fails to connect for a while (backoff from 1 s
     /// up to 30 s). A single connection tries the hosts in order. Each attempt gets its share of
-    /// `connect_timeout`, so an unresponsive host cannot use it all up. Only network errors move
-    /// on to the next host; a wrong password, say, fails at once. In the URL:
+    /// `connect_timeout`, so an unresponsive host cannot use it all up. Only network errors
+    /// and a host at its connection limit (error 1040) move on to the next host; a wrong
+    /// password, say, fails at once. In the URL:
     /// `tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`.
     ///
     /// Existing connections are not moved: after an outage, a recovered host fills up again as
@@ -227,6 +228,8 @@ impl ConnectOptions {
         self
     }
 
+    /// Time allowed for opening a connection, authentication included (default 30 s). It must
+    /// not be zero: connecting then fails with a configuration error.
     pub fn connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = timeout;
         self
@@ -279,7 +282,6 @@ impl FromStr for ConnectOptions {
                 return Err(Error::config(format!("unsupported URL scheme {other:?}; expected tidb:// or mysql://")));
             }
         }
-        let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
 
         let mut opts = ConnectOptions::new();
         match host_list {
@@ -295,19 +297,19 @@ impl FromStr for ConnectOptions {
             }
         }
         if !url.username().is_empty() {
-            opts.username = decode(url.username());
+            opts.username = decode(url.username())?;
         }
         if let Some(pw) = url.password() {
-            opts.password = Some(decode(pw));
+            opts.password = Some(decode(pw)?);
         }
         let path = url.path().trim_start_matches('/');
         if !path.is_empty() {
-            opts.database = Some(decode(path));
+            opts.database = Some(decode(path)?);
         }
         // Not `query_pairs()`: it reads `+` as a space, which would break `timezone=+08:00`.
         for pair in url.query().unwrap_or_default().split('&').filter(|p| !p.is_empty()) {
             let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-            let (k, v) = (decode(k), decode(v));
+            let (k, v) = (decode(k)?, decode(v)?);
             match &*k {
                 "ssl-mode" => opts.ssl_mode = v.parse()?,
                 "ssl-ca" => opts.ssl_ca = Some(PathBuf::from(v)),
@@ -324,7 +326,8 @@ impl FromStr for ConnectOptions {
                     opts.load_balance_dns = v.parse().map_err(|_| Error::config("invalid load-balance-dns"))?
                 }
                 "connect-timeout" => {
-                    let secs: u64 = v.parse().map_err(|_| Error::config("invalid connect-timeout (seconds)"))?;
+                    let secs = v.parse().ok().filter(|&s: &u64| s > 0);
+                    let secs = secs.ok_or_else(|| Error::config("invalid connect-timeout (seconds, at least 1)"))?;
                     opts.connect_timeout = Duration::from_secs(secs);
                 }
                 // Any other key is a session variable: ?tidb_isolation_read_engines=tiflash
@@ -332,6 +335,14 @@ impl FromStr for ConnectOptions {
             }
         }
         Ok(opts)
+    }
+}
+
+/// Percent-decode one part of the URL.
+fn decode(s: &str) -> Result<String> {
+    match percent_decode_str(s).decode_utf8() {
+        Ok(decoded) => Ok(decoded.into_owned()),
+        Err(_) => Err(Error::config(format!("{s:?} in the database URL is not UTF-8 once percent-decoded"))),
     }
 }
 
@@ -370,7 +381,7 @@ fn split_host_list(url: &str) -> Result<(std::borrow::Cow<'_, str>, Option<Vec<(
             return Err(bad(h));
         }
         let port = port.map(|p| p.parse::<u16>().map_err(|_| bad(h))).transpose()?;
-        hosts.push((percent_decode_str(host).decode_utf8_lossy().into_owned(), port));
+        hosts.push((decode(host)?, port));
     }
     let first = list.split(',').next().unwrap_or_default();
     let rewritten = format!("{}{}{}", &url[..start + hosts_start], first, &url[end..]);
@@ -404,6 +415,23 @@ mod tests {
         assert_eq!(o.timezone.as_deref(), Some("+08:00"));
         assert_eq!(o.ssl_ca.as_deref(), Some(std::path::Path::new("/etc/a+b.pem")));
         assert_eq!(o.session_vars, vec![("x".into(), "a b+c".into())]);
+    }
+
+    #[test]
+    fn invalid_urls_are_configuration_errors() {
+        for bad in [
+            // percent-encoded bytes that are not UTF-8, in every decoded part
+            "tidb://%FF@h/db",
+            "tidb://u:%FF@h/db",
+            "tidb://u@h/d%FFb",
+            "tidb://u@h/db?timezone=%FF",
+            "tidb://u@h/db?%FF=1",
+            "tidb://u@a,b%FF/db",
+            // a zero timeout would fail every connect
+            "tidb://u@h/db?connect-timeout=0",
+        ] {
+            assert!(matches!(bad.parse::<ConnectOptions>(), Err(Error::Configuration(_))), "{bad}");
+        }
     }
 
     #[test]
