@@ -36,11 +36,14 @@ fn manifest_path(args: &[String]) -> Option<&str> {
     })
 }
 
+/// Whether the user's arguments name the packages to check (`-p app`, `-papp`, `--package=app`).
+fn names_packages(args: &[String]) -> bool {
+    args.iter().any(|a| a.starts_with("--package") || (a.starts_with("-p") && !a.starts_with("--")))
+}
+
 /// Whether the user's arguments restrict the check to some workspace members.
 fn selects_packages(args: &[String]) -> bool {
-    args.iter().any(|a| {
-        a.starts_with("--package") || a.starts_with("--exclude") || (a.starts_with("-p") && !a.starts_with("--"))
-    })
+    names_packages(args) || args.iter().any(|a| a.starts_with("--exclude"))
 }
 
 /// `cargo check` flags added unless the user's arguments already have them (cargo rejects a repeated flag).
@@ -50,7 +53,8 @@ fn default_check_flags(args: &[String]) -> Vec<&'static str> {
     if !has("--all-targets") {
         flags.push("--all-targets");
     }
-    if !selects_packages(args) && !has("--workspace") && !has("--all") {
+    // `--exclude` needs it too: cargo only accepts it together with `--workspace`.
+    if !names_packages(args) && !has("--workspace") && !has("--all") {
         flags.push("--workspace");
     }
     flags
@@ -233,6 +237,7 @@ mod tests {
         assert_eq!(default_check_flags(&args(&["--all-features"])), ["--all-targets", "--workspace"]);
         assert!(default_check_flags(&args(&["--workspace", "--all-targets"])).is_empty());
         assert_eq!(default_check_flags(&args(&["-p", "app"])), ["--all-targets"]);
+        assert_eq!(default_check_flags(&args(&["--exclude", "app"])), ["--all-targets", "--workspace"]);
     }
 
     #[test]

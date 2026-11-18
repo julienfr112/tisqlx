@@ -31,5 +31,17 @@ uuid = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 trybuild = "1"
 
+[[test]]
+name = "macros"
+required-features = ["macros", "chrono", "decimal"]
+
+[[test]]
+name = "derives"
+required-features = ["macros"]
+
+[[test]]
+name = "test_attr"
+required-features = ["macros"]
+
 [lints]
 workspace = true

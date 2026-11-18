@@ -72,8 +72,9 @@ fn build_script_compiles_for_any_path() {
     assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("cargo:rerun-if-changed={source}\n"));
 }
 
-/// Like the macros: the nearest `.env` *file* is read (a directory of that name is skipped),
-/// and the real environment wins. A malformed line is reported, not silently the end of the file.
+/// The nearest `.env` *file* of the current directory and its ancestors is read (a directory of
+/// that name is skipped), and the real environment wins. A malformed line ends the file, with a
+/// warning. (The macros differ: they start at the crate's directory and skip a malformed line.)
 #[test]
 fn dotenv_lookup() {
     let d = temp_dir("dotenv");
