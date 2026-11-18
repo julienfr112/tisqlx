@@ -17,10 +17,10 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha384};
 
-use crate::connection::TiConnection;
+use crate::connection::{QueryResult, TiConnection};
 use crate::error::{BoxDynError, Error};
 use crate::pool::Pool;
-use crate::query::{query, query_as};
+use crate::query::{Query, query, query_as};
 use crate::util::quote_ident;
 
 /// The table recording applied migrations, in the database the connection is on.
@@ -343,13 +343,10 @@ impl Migrator {
         }
         let done = if applied {
             let m = self.find_up(version).ok_or(MigrateError::VersionNotPresent(version))?;
-            query(format!("UPDATE {table} SET success = TRUE, checksum = ? WHERE version = ?"))
-                .bind(&*m.checksum)
-                .bind(version)
-                .execute(&mut *conn)
-                .await
+            let update = query(format!("UPDATE {table} SET success = TRUE, checksum = ? WHERE version = ?"));
+            record(conn, update.bind(&*m.checksum).bind(version)).await
         } else {
-            query(format!("DELETE FROM {table} WHERE version = ?")).bind(version).execute(&mut *conn).await
+            record(conn, query(format!("DELETE FROM {table} WHERE version = ?")).bind(version)).await
         };
         match done {
             Ok(r) if r.rows_affected > 0 => Ok(()),
@@ -475,22 +472,15 @@ impl Migrator {
         let applied = self.applied(conn).await?;
         for m in self.pending(&applied, target)? {
             log::info!("applying migration {} {}", m.version, m.description);
-            query(format!(
+            let insert = query(format!(
                 "INSERT INTO {table} (version, description, success, checksum, execution_time) VALUES (?, ?, FALSE, ?, -1)"
-            ))
-            .bind(m.version)
-            .bind(&*m.description)
-            .bind(&*m.checksum)
-            .execute(&mut *conn)
-            .await?;
+            ));
+            record(conn, insert.bind(m.version).bind(&*m.description).bind(&*m.checksum)).await?;
             let start = Instant::now();
             self.execute(conn, &db, m).await?;
             let elapsed = start.elapsed().as_nanos() as i64;
-            let done = query(format!("UPDATE {table} SET success = TRUE, execution_time = ? WHERE version = ?"))
-                .bind(elapsed)
-                .bind(m.version)
-                .execute(&mut *conn)
-                .await?;
+            let update = query(format!("UPDATE {table} SET success = TRUE, execution_time = ? WHERE version = ?"));
+            let done = record(conn, update.bind(elapsed).bind(m.version)).await?;
             if done.rows_affected == 0 {
                 // The record was removed while the migration ran.
                 return Err(MigrateError::NotApplied(m.version));
@@ -505,15 +495,22 @@ impl Migrator {
         for down in self.to_revert(&applied, target)? {
             let version = down.version;
             log::info!("reverting migration {version} {}", down.description);
-            query(format!("UPDATE {table} SET success = FALSE WHERE version = ?"))
-                .bind(version)
-                .execute(&mut *conn)
-                .await?;
+            record(conn, query(format!("UPDATE {table} SET success = FALSE WHERE version = ?")).bind(version)).await?;
             self.execute(conn, &db, down).await?;
-            query(format!("DELETE FROM {table} WHERE version = ?")).bind(version).execute(&mut *conn).await?;
+            record(conn, query(format!("DELETE FROM {table} WHERE version = ?")).bind(version)).await?;
         }
         Ok(())
     }
+}
+
+/// Write to the migrations table, and commit. With `autocommit` off (in the session, or
+/// turned off by a migration) the write would wait in a transaction that nothing commits.
+async fn record(conn: &mut TiConnection, write: Query<'_>) -> Result<QueryResult, Error> {
+    let done = write.execute(&mut *conn).await?;
+    if conn.in_transaction() {
+        conn.execute_raw("COMMIT").await?;
+    }
+    Ok(done)
 }
 
 /// `GET_LOCK` takes whole seconds: round up, so a sub-second timeout still waits.

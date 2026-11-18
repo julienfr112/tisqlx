@@ -36,6 +36,10 @@ async fn tidb_features() {
     assert!(query("INSERT INTO ar (v) VALUES (2)").execute(&mut *tx).await.is_err(), "stale read txn is read-only");
     tx.commit().await.unwrap();
 
+    let mut tx = conn.begin_with(&TxnOptions::CausalConsistencyOnly).await.unwrap();
+    query("INSERT INTO ar (v) VALUES (3)").execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+
     conn.set_read_staleness(Some(Duration::from_secs(1))).await.unwrap();
     conn.set_read_staleness(None).await.unwrap();
     conn.set_isolation_read_engines(&[Engine::TiKV, Engine::TiDB]).await.unwrap();

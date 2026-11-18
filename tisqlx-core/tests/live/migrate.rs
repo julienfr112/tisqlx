@@ -136,8 +136,7 @@ async fn cancelled_run_releases_the_migration_lock() {
     assert!(cancelled.is_err());
     // The connection was dropped mid-command, so the pool discarded it and the server
     // ends its session, lock included: another runner gets the lock (and then reports
-    // the interrupted migration as dirty). TiDB 8.x ends the session at once; 7.x only
-    // once the running statement finishes, so the next runner may wait for it.
+    // the interrupted migration as dirty).
     let mut other = opts.connect().await.unwrap();
     let quick = Migrator { lock_timeout: std::time::Duration::from_secs(10), ..Migrator::new(&d).unwrap() };
     let err = quick.run_on(&mut other).await.unwrap_err();
@@ -181,6 +180,37 @@ async fn migration_sql_cannot_break_the_bookkeeping() {
     let n: i64 = query_scalar("SELECT COUNT(*) FROM t2").fetch_one(&mut conn).await.unwrap();
     assert_eq!(n, 0, "the open transaction was rolled back");
     assert!(matches!(Migrator::new(&d).unwrap().run_on(&mut conn).await, Err(MigrateError::Dirty(3))));
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn bookkeeping_is_committed_when_autocommit_is_off() {
+    require_db!();
+    let opts = fresh_db("migautocommit").await;
+    let mut observer = opts.connect().await.unwrap();
+    let d = dir(
+        "migautocommit",
+        &[
+            ("1_off.up.sql", "SET autocommit = 0; CREATE TABLE t (id INT PRIMARY KEY);"),
+            ("1_off.down.sql", "DROP TABLE t;"),
+        ],
+    );
+    let m = Migrator::new(&d).unwrap();
+    // The migration turns autocommit off: what the migrator records afterwards must not stay
+    // in a transaction that the end of the session rolls back.
+    let mut conn = opts.connect().await.unwrap();
+    m.run_on(&mut conn).await.unwrap();
+    assert!(!conn.in_transaction());
+    let applied = m.applied(&mut observer).await.unwrap();
+    assert!(applied.len() == 1 && applied[0].success, "{applied:?}");
+    // The same for a session that had it off from the start.
+    m.undo(&mut conn, None).await.unwrap();
+    assert!(m.applied(&mut observer).await.unwrap().is_empty());
+    m.run_on(&mut conn).await.unwrap();
+    m.repair(&mut conn, 1, true).await.unwrap();
+    drop(conn);
+    let applied = m.applied(&mut observer).await.unwrap();
+    assert!(applied.len() == 1 && applied[0].success, "{applied:?}");
 }
 
 #[tokio::test]
