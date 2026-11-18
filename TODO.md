@@ -6,21 +6,12 @@ it is tested.
 
 ## Housekeeping
 
-- [ ] **P2: Run CI once for real.** There is no git remote, so `.github/workflows/ci.yml` has
-  never run.
-  - The v7.5.6 leg was reproduced locally with the same docker image.
-  - The v8.5.8 leg was only reproduced with the tiup binary, not with `pingcap/tidb:v8.5.8`.
-  - The nightly cluster job installs tiup in CI; that install step is untested.
+- [ ] **Deferred: run CI once for real**, when the repository has a remote. Until then
+  `.github/workflows/ci.yml` has never run. [TESTING.md § CI](TESTING.md#ci) lists what was
+  checked locally, what wasn't, and the steps for the first run.
 
 ## Correctness
 
-- [ ] **P2: `DateTime<Utc>` / `OffsetDateTime` silently assume a UTC session.** This is
-  documented, but with `timezone=server` on a non-UTC server, TIMESTAMP values are read and
-  written shifted, with no error.
-  - *Why it's still open:* `Encode` and `Decode` get no connection context. Enforcing it means
-    threading a "session is UTC" flag into `Arguments` and `ValueRef`, which is an API-level change.
-  - *Option:* refuse to connect when `timezone` is unset and the server zone is not UTC, but
-    only if the caller opted into chrono or time.
 - [ ] **P3: `Option<T>::produces` for `None`.** It declares `T`'s type (e.g. JSON) for a NULL
   parameter. This is harmless as far as tested (TiDB checks the NULL bitmap first), but it has not
   been verified for every type.
@@ -30,10 +21,12 @@ it is tested.
 
 ## Macros and offline data
 
-- [ ] **P2: Bind argument types are not checked against the server.** TiDB reports every
-  parameter as a string, so only the bind count is checked at compile time; argument types are
-  only checked by the `Encode` bound.
-  *Fix (partial):* infer the expected types from the SQL context (columns compared with `?`).
+- [ ] **P3: Check more bind positions.** Arguments are checked where the analyzer
+  (`tisqlx-macros-core/src/params.rs`) finds the column next to a `?`.
+  - Still unchecked: function arguments, subqueries, the select list, HAVING, UNION and CTEs,
+    `INSERT` without a column list, and `INSERT … SELECT`.
+  - A SQL parser (e.g. `sqlparser`) could cover more, at the cost of a large compile-time
+    dependency and TiDB syntax it may not know.
 - [ ] **P3: A renamed dependency breaks the generated code.** Expansions hard-code `::tisqlx::…`.
   *Fix:* support `#[tisqlx(crate = "...")]` or use `proc-macro-crate`.
 - [ ] **P3: Indirect macro users go undetected by `tisqlx prepare`.** Workspace members that use
@@ -61,10 +54,6 @@ it is tested.
 
 ## Performance
 
-- [ ] **P2: Ping on every pooled acquire.** `test_before_acquire` (default on) adds a round trip
-  to every query run through `&Pool`.
-  *Option:* only ping connections idle for longer than a threshold. This changes behaviour
-  (sqlx also pings every time), so it is left as a decision.
 - [ ] **P3: Allocations on every packet.** `recv_packet` allocates and zero-fills a fresh `Vec`
   per packet.
   *Fix:* reuse a buffer for control packets.
@@ -78,7 +67,6 @@ it is tested.
 ## Missing features
 
 - [ ] **P3: Remaining types.**
-  - `chrono::DateTime<FixedOffset>`/`Local` (needs the session zone; see above).
   - Network address types for `INET6_ATON` values.
   - The macros can't infer `types::Vector`, because TiDB sends VECTOR columns as text; it needs
     an override.
@@ -155,6 +143,43 @@ checked to fail when the fix is reverted.
   returning old data, bounded staleness, and pessimistic lock-wait timeouts.
 - **Moved to the standard tier,** because they work standalone: the `resource-group` option, and
   pool recovery after `KILL`.
+
+**Session time zones** (`tisqlx-core/src/tz.rs`)
+- **Instant types follow the session `time_zone`.** `DateTime<Utc>`, the new
+  `DateTime<FixedOffset>` and `DateTime<Local>`, and `OffsetDateTime` are converted on the
+  client: bind parameters at execute time, values at decode.
+  - Zone data comes from jiff with the system tzdata (bundled only on Windows).
+  - Around DST changes, wall times map to instants exactly as TiDB maps them (Go's
+    `time.Date`, with gap times clamped to the transition).
+  - `TiConnection::reload_time_zone()` handles a raw `SET time_zone`, since TiDB has no
+    session tracking.
+- Tests:
+  - unit `tz::tests`;
+  - live `timezone::*`: round trips through DATETIME and TIMESTAMP in Europe/Paris, and
+    DST parity with `UNIX_TIMESTAMP` in Paris and New York, on 8.5.8 and 7.5.6. Both were
+    checked to fail when the conversion is removed.
+
+**Pool pings only after `ping_after_idle`** (default 30 s; `Duration::ZERO` pings every time).
+Tests: mock `recently_returned_connection_is_not_pinged`, live
+`recently_used_connection_killed_by_the_server_fails_once`.
+
+**Bind arguments are type-checked at compile time** where the column next to a `?` can be
+found.
+- **How:**
+  - a lexical analyzer finds the column;
+  - a probe `SELECT <columns> FROM <the query's FROM>` gets its type from the server;
+  - autoref dispatch checks the argument's kind (`tisqlx_core::bind_check`).
+- **Never rejected:** types tisqlx cannot classify, including generic arguments and derived
+  newtypes over such types. `value as _` opts one argument out.
+- **Unsuffixed numeric literals** are classified from the syntax, since their type is still
+  being inferred when the check runs.
+- **Offline data** stores the inferred types: 31 of the 37 parameters in the repo's 18 queries
+  are checked.
+- **Tests:**
+  - unit `params::tests` (including placeholders inside strings and comments) and
+    `bind_check::tests`;
+  - acceptance in `tisqlx/tests/macros.rs` (`bind_arguments_of_compatible_types`);
+  - rejection in `tests/ui-query/bind_types.rs`.
 
 **Features**
 - **`Pool::transaction_retry_if` and `tisqlx::error::is_retryable`,** so retries work with

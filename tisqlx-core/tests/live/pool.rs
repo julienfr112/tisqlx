@@ -237,7 +237,7 @@ async fn retry_with_a_foreign_error_type() {
 async fn pool_recovers_from_connections_killed_by_the_server() {
     require_db!();
     let opts = fresh_db("poolkill").await;
-    let pool = PoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+    let pool = PoolOptions::new().max_connections(1).ping_after_idle(Duration::ZERO).connect_with(opts).await.unwrap();
     let id = pool.acquire().await.unwrap().connection_id();
     let mut admin = TiConnection::connect(&base_url()).await.unwrap();
     admin.execute_raw(&format!("KILL {id}")).await.unwrap();
@@ -247,4 +247,25 @@ async fn pool_recovers_from_connections_killed_by_the_server() {
     let one: i64 = query_scalar("SELECT 1").fetch_one(&mut *conn).await.unwrap();
     assert_eq!(one, 1);
     assert_eq!(pool.size(), 1);
+}
+
+#[tokio::test]
+async fn recently_used_connection_killed_by_the_server_fails_once() {
+    // With the default `ping_after_idle`, a connection returned moments ago is not pinged:
+    // the first query on it fails, the pool discards it, and the next checkout is healthy.
+    require_db!();
+    let opts = fresh_db("poolkillrecent").await;
+    let pool = PoolOptions::new().max_connections(1).connect_with(opts).await.unwrap();
+    let id = pool.acquire().await.unwrap().connection_id();
+    let mut admin = TiConnection::connect(&base_url()).await.unwrap();
+    admin.execute_raw(&format!("KILL {id}")).await.unwrap();
+    {
+        let mut conn = pool.acquire().await.unwrap();
+        assert_eq!(conn.connection_id(), id, "not pinged, so the dead connection is handed out");
+        assert!(query_scalar::<i64>("SELECT 1").fetch_one(&mut *conn).await.is_err());
+    }
+    let mut conn = pool.acquire().await.unwrap();
+    assert_ne!(conn.connection_id(), id);
+    let one: i64 = query_scalar("SELECT 1").fetch_one(&mut *conn).await.unwrap();
+    assert_eq!(one, 1);
 }

@@ -61,4 +61,36 @@ After changing a `query!` call or the test schema (`tisqlx/tests/migrations`), r
 | `make coverage` | `cargo llvm-cov` HTML report over the live tier (about 81% of lines) |
 | `make ci` | lint + features + test-live + prepare-check |
 
-CI (`.github/workflows/ci.yml`) also runs the live tier against TiDB v7.5.6 (verified locally with the same docker image; version-dependent tests such as `VECTOR` skip with a reason).
+## CI
+
+`.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, nightly, and on demand.
+
+| Job | When | What |
+|---|---|---|
+| `lint` | always | `make lint features` |
+| `msrv` | always | `cargo check --all-targets --all-features` on Rust 1.88 |
+| `unit` | always | `make test-unit` (no database) |
+| `live` | always, for TiDB v8.5.8 and v7.5.6 | the dedicated TiDB in docker, then `make test-live TEST_SOCKET=` (no socket, so socket auth reports itself untested); v8.5.8 also runs `make prepare-check` |
+| `cluster` | nightly and on demand | installs tiup, then `make db-cluster test-cluster` |
+| `audit` | always | `rustsec/audit-check` |
+
+**Status: the workflow has never run.** The repository has no remote yet, so this is put aside
+until it gets one. What has been checked locally, and what hasn't:
+
+| Piece | Checked locally? |
+|---|---|
+| `make lint features`, `make test-unit`, MSRV 1.88 | yes, same commands |
+| `live` with v7.5.6 | yes, same docker image and command |
+| `live` with v8.5.8 | only with the tiup `tidb-server` binary, not the `pingcap/tidb:v8.5.8` image |
+| `cluster` tier | yes with a local tiup; the job's tiup install step is untested |
+| `audit` action, `Swatinem/rust-cache`, the GitHub runner environment | no |
+
+**Known gap.** The docker TiDB runs with a UTC system zone. In CI the `timezone=server` path
+therefore only covers the trivial UTC case. The explicit `Europe/Paris` and `America/New_York`
+time-zone tests do run in CI. Locally, `make db-up` inherits the machine's zone.
+
+**First run, once there is a remote:**
+1. Push a branch and open a pull request: it runs everything except `cluster`.
+2. Trigger `cluster` once with "Run workflow" (`workflow_dispatch`).
+3. Expect the first `live` run to be slow: the cargo cache is cold and the TiDB image downloads.
+

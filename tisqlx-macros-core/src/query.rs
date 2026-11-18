@@ -1,12 +1,13 @@
 //! `query!`, `query_as!`, `query_scalar!` and their `_file` variants.
 
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 use syn::parse::ParseStream;
+use syn::spanned::Spanned;
 use syn::{Expr, LitStr, Path, Token, Type};
 
 use crate::describe::describe;
-use crate::rust_types::rust_type_for;
+use crate::rust_types::{bind_column_kind, rust_type_for};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -25,7 +26,14 @@ pub enum Source {
 pub struct QueryInput {
     record: Option<Path>,
     sql: LitStr,
-    args: Vec<Expr>,
+    args: Vec<Arg>,
+}
+
+#[derive(Debug)]
+struct Arg {
+    expr: Expr,
+    /// `false` for `value as _`: bound without the compile-time type check.
+    checked: bool,
 }
 
 impl QueryInput {
@@ -45,10 +53,29 @@ impl QueryInput {
                 if input.is_empty() {
                     break;
                 }
-                args.push(input.parse()?);
+                args.push(match input.parse()? {
+                    // `value as _` cannot compile as a bind argument otherwise, so it is free to
+                    // mean "don't check this argument's type".
+                    Expr::Cast(c) if matches!(*c.ty, Type::Infer(_)) => Arg { expr: *c.expr, checked: false },
+                    expr => Arg { expr, checked: true },
+                });
             }
             Ok(Self { record, sql, args })
         }
+    }
+}
+
+/// `5`, `-2.5`: a literal whose type is still an inference variable in the generated check.
+fn is_unsuffixed_number(expr: &Expr) -> bool {
+    match expr {
+        Expr::Lit(l) => match &l.lit {
+            syn::Lit::Int(i) => i.suffix().is_empty(),
+            syn::Lit::Float(f) => f.suffix().is_empty(),
+            _ => false,
+        },
+        Expr::Unary(u) if matches!(u.op, syn::UnOp::Neg(_)) => is_unsuffixed_number(&u.expr),
+        Expr::Paren(p) => is_unsuffixed_number(&p.expr),
+        _ => false,
     }
 }
 
@@ -164,10 +191,45 @@ pub fn expand(input: QueryInput, kind: Kind, source: Source) -> syn::Result<Toke
     // Evaluate every argument (in order, once) before any generated binding exists,
     // so user expressions cannot see or be shadowed by the macro's names.
     let arg_names: Vec<_> = (0..input.args.len()).map(|i| format_ident!("__arg{}", i)).collect();
-    let args = &input.args;
+    let args = input.args.iter().map(|a| &a.expr);
+    // Each argument whose parameter type was inferred must be of a compatible class (see
+    // `tisqlx_core::bind_check`). Only references are taken: nothing is evaluated twice.
+    let checks = if described.param_types.len() == input.args.len() {
+        input
+            .args
+            .iter()
+            .zip(&described.param_types)
+            .zip(&arg_names)
+            .filter(|((arg, _), _)| arg.checked)
+            .filter_map(|((arg, ty), name)| {
+                let col = bind_column_kind(ty.as_ref()?)?;
+                let check = quote!(::tisqlx::bind_check);
+                if is_unsuffixed_number(&arg.expr) {
+                    return Some(quote_spanned! {arg.expr.span()=>
+                        let () = #check::accept::<#check::col::#col, _>(#check::Class::number());
+                    });
+                }
+                Some(quote_spanned! {arg.expr.span()=>
+                    // The `&&` picks `Known` over `Unknown` (autoref dispatch).
+                    #[allow(clippy::needless_borrow)]
+                    let () = #check::accept::<#check::col::#col, _>((&&#check::Probe::new(#name)).class());
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let checks = (!checks.is_empty()).then(|| {
+        quote! {
+            #[allow(unused_imports)]
+            use ::tisqlx::bind_check::{Known as _, Unknown as _};
+            #( #checks )*
+        }
+    });
     let bind = quote! {
         let __args = match (#( &(#args), )*) {
             (#( #arg_names, )*) => {
+                #checks
                 let mut __args = ::tisqlx::Arguments::new();
                 #( __args.add(#arg_names); )*
                 __args

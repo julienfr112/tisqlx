@@ -1,0 +1,89 @@
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+ --> tests/ui-query/bind_types.rs:6:65
+  |
+6 |     let _ = tisqlx::query!("SELECT id FROM users WHERE id = ?", "1");
+  |                                                                 ^^^ a `tisqlx::bind_check::class::Text` value, but the parameter expects a `tisqlx::bind_check::col::Numeric` value
+  |
+  = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::Numeric>` is not implemented for `tisqlx::bind_check::class::Text`
+  = note: the query macros infer the parameter's type from the column next to its `?`
+  = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+ --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+  |
+  | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+  |                       ^^^^^^^^^^^ required by this bound in `accept`
+
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+ --> tests/ui-query/bind_types.rs:9:73
+  |
+9 |     let _ = tisqlx::query!("SELECT id FROM users WHERE created_at > ?", since);
+  |                                                                         ^^^^^ a `tisqlx::bind_check::class::Number` value, but the parameter expects a `tisqlx::bind_check::col::DateTime` value
+  |
+  = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::DateTime>` is not implemented for `tisqlx::bind_check::class::Number`
+  = note: the query macros infer the parameter's type from the column next to its `?`
+  = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+ --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+  |
+  | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+  |                       ^^^^^^^^^^^ required by this bound in `accept`
+
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+  --> tests/ui-query/bind_types.rs:11:86
+   |
+11 |     let _ = tisqlx::query!("INSERT INTO posts (user_id, title) VALUES (?, ?)", 1i64, 2.5f64);
+   |                                                                                      ^^^^^^ a `tisqlx::bind_check::class::Number` value, but the parameter expects a `tisqlx::bind_check::col::Text` value
+   |
+   = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::Text>` is not implemented for `tisqlx::bind_check::class::Number`
+   = note: the query macros infer the parameter's type from the column next to its `?`
+   = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+  --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+   |
+   | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+   |                       ^^^^^^^^^^^ required by this bound in `accept`
+
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+  --> tests/ui-query/bind_types.rs:13:67
+   |
+13 |     let _ = tisqlx::query!("SELECT id FROM users WHERE name = ?", 5);
+   |                                                                   ^ a `tisqlx::bind_check::class::Number` value, but the parameter expects a `tisqlx::bind_check::col::Text` value
+   |
+   = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::Text>` is not implemented for `tisqlx::bind_check::class::Number`
+   = note: the query macros infer the parameter's type from the column next to its `?`
+   = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+  --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+   |
+   | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+   |                       ^^^^^^^^^^^ required by this bound in `accept`
+
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+  --> tests/ui-query/bind_types.rs:15:67
+   |
+15 |     let _ = tisqlx::query!("SELECT id FROM users WHERE name = ?", UserId(1));
+   |                                                                   ^^^^^^ a `tisqlx::bind_check::class::Number` value, but the parameter expects a `tisqlx::bind_check::col::Text` value
+   |
+   = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::Text>` is not implemented for `tisqlx::bind_check::class::Number`
+   = note: the query macros infer the parameter's type from the column next to its `?`
+   = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+  --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+   |
+   | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+   |                       ^^^^^^^^^^^ required by this bound in `accept`
+
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+  --> tests/ui-query/bind_types.rs:17:60
+   |
+17 |     let _ = tisqlx::query!("SELECT id FROM users LIMIT ?", "10");
+   |                                                            ^^^^ a `tisqlx::bind_check::class::Text` value, but the parameter expects a `tisqlx::bind_check::col::Numeric` value
+   |
+   = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::Numeric>` is not implemented for `tisqlx::bind_check::class::Text`
+   = note: the query macros infer the parameter's type from the column next to its `?`
+   = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+  --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+   |
+   | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+   |                       ^^^^^^^^^^^ required by this bound in `accept`

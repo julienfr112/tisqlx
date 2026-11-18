@@ -27,6 +27,7 @@ pub struct PoolOptions {
     idle_timeout: Option<Duration>,
     max_lifetime: Option<Duration>,
     test_before_acquire: bool,
+    ping_after_idle: Duration,
     after_connect: Option<AfterConnect>,
 }
 
@@ -39,6 +40,7 @@ impl fmt::Debug for PoolOptions {
             .field("idle_timeout", &self.idle_timeout)
             .field("max_lifetime", &self.max_lifetime)
             .field("test_before_acquire", &self.test_before_acquire)
+            .field("ping_after_idle", &self.ping_after_idle)
             .finish()
     }
 }
@@ -59,6 +61,7 @@ impl PoolOptions {
             // TiDB load balancers commonly cut connections; recycle well before that.
             max_lifetime: Some(Duration::from_secs(30 * 60)),
             test_before_acquire: true,
+            ping_after_idle: Duration::from_secs(30),
             after_connect: None,
         }
     }
@@ -88,9 +91,21 @@ impl PoolOptions {
         self
     }
 
-    /// Ping idle connections before handing them out (default `true`).
+    /// Ping idle connections before handing them out (default `true`), subject to
+    /// [`ping_after_idle`](Self::ping_after_idle).
     pub fn test_before_acquire(mut self, yes: bool) -> Self {
         self.test_before_acquire = yes;
+        self
+    }
+
+    /// Only ping connections that sat idle at least this long (default 30 s).
+    ///
+    /// A connection returned moments ago is almost certainly alive, so skipping its ping saves a
+    /// round trip per checkout under load. The cost: if the server drops a recently used
+    /// connection, the next query on it fails once instead of the pool replacing it silently.
+    /// `Duration::ZERO` pings on every checkout.
+    pub fn ping_after_idle(mut self, d: Duration) -> Self {
+        self.ping_after_idle = d;
         self
     }
 
@@ -242,6 +257,8 @@ impl PoolInner {
         let mut raw = TiConnection::connect_with(&self.connect_options).await?;
         if let Some(hook) = &self.options.after_connect {
             hook(&mut raw).await?;
+            // The hook may have changed `time_zone`.
+            raw.reload_time_zone().await?;
         }
         Ok(Live { raw, created_at: Instant::now(), _slot: slot })
     }
@@ -323,6 +340,7 @@ impl Pool {
             let idle = inner.idle.lock().unwrap().pop_back();
             let Some(idle) = idle else { break };
             let expired = inner.is_idle_expired(&idle) || inner.is_expired(&idle.live);
+            let ping = inner.options.test_before_acquire && idle.since.elapsed() >= inner.options.ping_after_idle;
             let mut live = idle.live;
             if expired {
                 // Free the slot now: this acquirer may open a replacement right away.
@@ -332,7 +350,7 @@ impl Pool {
                 });
                 continue;
             }
-            if inner.options.test_before_acquire {
+            if ping {
                 match tokio::time::timeout(inner.io_timeout(), live.raw.ping()).await {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {

@@ -58,7 +58,7 @@ mod int;
 mod json;
 mod set;
 mod str;
-mod temporal;
+pub(crate) mod temporal;
 #[cfg(feature = "time")]
 mod time;
 #[cfg(feature = "uuid")]

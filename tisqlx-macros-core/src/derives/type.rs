@@ -35,6 +35,15 @@ pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
             let (t_impl, t_ty, t_where) = type_generics.split_for_impl();
             let encode_generics = bounded(quote!(::tisqlx::Encode));
             let (e_impl, e_ty, e_where) = encode_generics.split_for_impl();
+            // Under a binder, the bound is not "trivial" (checked eagerly) for a non-generic
+            // newtype: over a type tisqlx cannot classify, the impl just doesn't apply, and the
+            // newtype is not checked either (instead of the derive failing to compile).
+            let mut class_generics = input.generics.clone();
+            class_generics
+                .make_where_clause()
+                .predicates
+                .push(syn::parse_quote!(for<'__tisqlx> #inner: ::tisqlx::bind_check::BindClass));
+            let (c_impl, c_ty, c_where) = class_generics.split_for_impl();
             // Decode borrows from the row: reuse the newtype's lifetime, else add `'r`.
             let mut decode_generics = input.generics.clone();
             let lt = match input.generics.lifetimes().next() {
@@ -60,6 +69,10 @@ pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
                         ::tisqlx::Encode::encode(&self.0, buf)
                     }
                     fn produces(&self) -> ::tisqlx::TypeInfo { ::tisqlx::Encode::produces(&self.0) }
+                }
+                #[automatically_derived]
+                impl #c_impl ::tisqlx::bind_check::BindClass for #ident #c_ty #c_where {
+                    type Class = <#inner as ::tisqlx::bind_check::BindClass>::Class;
                 }
                 #[automatically_derived]
                 impl #d_impl ::tisqlx::Decode<#lt> for #ident #d_ty #d_where {
@@ -94,6 +107,10 @@ pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
                         let s: &str = match self { #(#to_str,)* };
                         ::tisqlx::Encode::encode(s, buf)
                     }
+                }
+                #[automatically_derived]
+                impl ::tisqlx::bind_check::BindClass for #ident {
+                    type Class = ::tisqlx::bind_check::class::Text;
                 }
                 #[automatically_derived]
                 impl<'r> ::tisqlx::Decode<'r> for #ident {

@@ -4,6 +4,8 @@
 //! Most users should depend on the `tisqlx` facade crate instead.
 
 pub mod arguments;
+#[doc(hidden)]
+pub mod bind_check;
 pub mod connection;
 pub mod decode;
 pub mod encode;
@@ -23,6 +25,7 @@ mod tls;
 pub mod transaction;
 pub mod type_info;
 pub mod types;
+mod tz;
 pub mod util;
 
 pub use arguments::Arguments;

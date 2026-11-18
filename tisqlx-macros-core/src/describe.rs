@@ -6,13 +6,17 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use tisqlx_core::offline;
-use tisqlx_core::{Describe, TiConnection};
+use tisqlx_core::{ColumnFlags, ColumnType, Describe, TiConnection, TypeInfo};
 
 /// One offline query file.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueryData {
     pub query: String,
     pub describe: Describe,
+    /// Per placeholder, the type of the column it is matched against, when inferred (see
+    /// [`crate::params`]). Empty in files written before inference existed: nothing is checked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_types: Vec<Option<TypeInfo>>,
 }
 
 pub(crate) fn manifest_dir() -> Result<PathBuf, String> {
@@ -91,7 +95,49 @@ enum Cached {
 const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const RETRY_FAILED_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
-fn describe_online(url: &str, sql: &str) -> Result<Describe, String> {
+/// Describe the query, then infer its parameter types with a probe query (prepared, never run).
+async fn describe_and_infer(
+    conn: &mut TiConnection,
+    sql: &str,
+) -> tisqlx_core::Result<(Describe, Vec<Option<TypeInfo>>)> {
+    let describe = conn.describe(sql).await?;
+    let analysis = crate::params::analyze(sql);
+    if analysis.placeholders != describe.params.len() {
+        // The lexer and the server disagree: check nothing rather than the wrong parameters.
+        return Ok((describe, Vec::new()));
+    }
+    let mut columns: Vec<Option<TypeInfo>> = vec![None; analysis.partners.len()];
+    if let Some(probe) = analysis.probe(None) {
+        match conn.describe(&probe).await {
+            Ok(d) if d.columns.len() == columns.len() => {
+                columns = d.columns.iter().map(|c| Some(c.type_info)).collect();
+            }
+            // One partner may not resolve (an alias, a typo the real query reports): try each.
+            _ if !conn.is_broken() => {
+                for (i, column) in columns.iter_mut().enumerate() {
+                    let probe = analysis.probe(Some(i)).expect("partners need a FROM");
+                    if let Ok(d) = conn.describe(&probe).await {
+                        *column = d.columns.first().map(|c| c.type_info);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let count = TypeInfo { flags: ColumnFlags(ColumnFlags::UNSIGNED), ..TypeInfo::new(ColumnType::LongLong) };
+    let types = analysis
+        .sites
+        .iter()
+        .map(|site| match site {
+            Some(crate::params::Site::Column(i)) => columns[*i],
+            Some(crate::params::Site::Count) => Some(count),
+            None => None,
+        })
+        .collect();
+    Ok((describe, types))
+}
+
+fn describe_online(url: &str, sql: &str) -> Result<(Describe, Vec<Option<TypeInfo>>), String> {
     static CONN: OnceLock<Mutex<Option<Cached>>> = OnceLock::new();
     let mut guard = CONN.get_or_init(|| Mutex::new(None)).lock().unwrap_or_else(|e| e.into_inner());
     runtime().block_on(async {
@@ -118,7 +164,7 @@ fn describe_online(url: &str, sql: &str) -> Result<Describe, String> {
         }
         let Some(Cached::Connected(_, conn)) = guard.as_mut() else { unreachable!() };
         // A server that accepts the query but never answers must not hang the build.
-        let result = match tokio::time::timeout(DESCRIBE_TIMEOUT, conn.describe(sql)).await {
+        let result = match tokio::time::timeout(DESCRIBE_TIMEOUT, describe_and_infer(conn, sql)).await {
             Ok(r) => r,
             Err(_) => {
                 *guard = None;
@@ -132,7 +178,7 @@ fn describe_online(url: &str, sql: &str) -> Result<Describe, String> {
     })
 }
 
-fn read_offline(env: &Env, sql: &str) -> Result<(Describe, PathBuf), String> {
+fn read_offline(env: &Env, sql: &str) -> Result<(QueryData, PathBuf), String> {
     let name = offline::file_name(sql);
     for dir in env.offline_dirs() {
         let path = dir.join(&name);
@@ -145,7 +191,7 @@ fn read_offline(env: &Env, sql: &str) -> Result<(Describe, PathBuf), String> {
                     path.display()
                 ));
             }
-            return Ok((data.describe, path));
+            return Ok((data, path));
         }
     }
     Err(format!(
@@ -153,10 +199,10 @@ fn read_offline(env: &Env, sql: &str) -> Result<(Describe, PathBuf), String> {
     ))
 }
 
-fn write_offline(dir: &Path, sql: &str, describe: &Describe) -> Result<(), String> {
+fn write_offline(dir: &Path, data: &QueryData) -> Result<(), String> {
+    let sql = &data.query;
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    let data = QueryData { query: sql.to_owned(), describe: describe.clone() };
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
     let path = dir.join(offline::file_name(sql));
     // Write atomically: cargo may build several crates (and rustc several threads) in parallel.
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -171,6 +217,8 @@ fn write_offline(dir: &Path, sql: &str, describe: &Describe) -> Result<(), Strin
 #[derive(Debug)]
 pub struct Described {
     pub describe: Describe,
+    /// See [`QueryData::param_types`].
+    pub param_types: Vec<Option<TypeInfo>>,
     /// Files the expansion depends on (offline data, `.env`): the generated code
     /// `include_str!`s them so cargo re-expands the macro when they change.
     pub inputs: Vec<PathBuf>,
@@ -181,16 +229,19 @@ pub fn describe(sql: &str) -> Result<Described, String> {
     let env = Env::load()?;
     let url = env.get("DATABASE_URL").map(str::to_owned);
     let mut inputs: Vec<PathBuf> = env.dotenv.iter().cloned().collect();
-    let describe = match (&url, env.offline()) {
-        (Some(url), false) => describe_online(url, sql)?,
+    let data = match (&url, env.offline()) {
+        (Some(url), false) => {
+            let (describe, param_types) = describe_online(url, sql)?;
+            QueryData { query: sql.to_owned(), describe, param_types }
+        }
         _ => {
-            let (describe, path) = read_offline(&env, sql)?;
+            let (data, path) = read_offline(&env, sql)?;
             inputs.push(path);
-            describe
+            data
         }
     };
     if let Some(dir) = env.get("TISQLX_OFFLINE_DIR") {
-        write_offline(Path::new(dir), sql, &describe)?;
+        write_offline(Path::new(dir), &data)?;
     }
-    Ok(Described { describe, inputs })
+    Ok(Described { describe: data.describe, param_types: data.param_types, inputs })
 }

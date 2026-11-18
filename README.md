@@ -67,6 +67,12 @@ session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
 
 The driver refuses to connect to a server that isn't TiDB unless `require-tidb=false`.
 
+**Pool checkouts** ping a connection only if it sat idle for at least `ping_after_idle`
+(default 30 s). A connection used moments ago is handed out as is. If the server dropped it
+in the meantime (a restart or a `KILL`), that one query fails and the pool discards the
+connection. `PoolOptions::ping_after_idle(Duration::ZERO)` pings on every checkout, and
+`test_before_acquire(false)` never pings.
+
 ## Query macros
 
 Set `DATABASE_URL`, either in the environment or in a `.env` file in the crate or one of its
@@ -81,8 +87,63 @@ in the column alias:
 | `` AS `col: MyType` `` | decode as `MyType` (any `Decode` type, e.g. a `#[derive(Type)]` enum) |
 | `` AS `col: _` `` | infer from the struct field (`query_as!` only) |
 
-Bind parameters are checked by count. TiDB reports every parameter as a string, so their types
-are checked by the `Encode` trait bound, not against the server.
+**Bind arguments** are checked by count, and by type where tisqlx can tell what a `?` stands for.
+TiDB reports every parameter as a string, so the macros read it from the SQL instead: the column
+a `?` is compared with or assigned to. They then ask the server for that column's type, by
+preparing (never running) `SELECT <those columns> FROM <the query's FROM>`.
+
+- **Recognised:** `col = ?` and the other comparisons, `[NOT] LIKE`, `IN (?, …)`,
+  `BETWEEN ? AND ?`, `SET col = ?`, `INSERT … (cols) VALUES (?, …)` and `LIMIT`/`OFFSET ?`.
+- **Not recognised:** anything else, such as a function argument, a subquery or the select
+  list, keeps only the `Encode` bound.
+- **Skipping the check:** `value as _` skips it for one argument; see the workarounds below.
+- **The check is by kind, and strict on purpose.** TiDB accepts almost any bound type and
+  converts it at runtime. Measured on 8.5.8:
+  - in a comparison, a mismatched value never errors: `WHERE id = 'abc'` or
+    `WHERE created_at > 5` silently matches nothing, with only a warning;
+  - in a write, the outcome depends on the value: `'5'` into a BIGINT works, `'abc'` fails.
+
+  So the check rejects any argument whose kind differs from the column's, before the value
+  can do either.
+- **Types tisqlx can't classify** are never rejected. That covers hand-written `Encode` impls,
+  generic arguments, and derived newtypes around such types.
+- **Offline data:** the inferred types are stored in `.tisqlx/`, so offline builds check the same
+  thing.
+
+Arguments accepted for each column type. `&T`, `Option<T>`, `Box<T>`, `Arc<T>` and
+`#[derive(Type)]` newtypes count as their inner `T`; a derived enum counts as text.
+
+| Column next to the `?` | Accepted arguments |
+|---|---|
+| `TINYINT`…`BIGINT` (incl. `UNSIGNED`), `BOOLEAN`, `DECIMAL`, `FLOAT`, `DOUBLE`, `BIT`, `YEAR`, and `LIMIT ?`/`OFFSET ?` | `i8`…`i128`, `u8`…`u128`, `f32`, `f64`, `bool`, `Decimal`, `BigDecimal` |
+| `CHAR`, `VARCHAR`, `TEXT`, `ENUM`, `SET`, `VECTOR` | `&str`, `String`, `Cow<str>`, `types::Set`, `types::Vector`, `uuid::fmt::Hyphenated`, derived enums, and JSON values (`serde_json::Value`, `Json<T>`, `&RawValue`) |
+| `BINARY`, `VARBINARY`, `BLOB` | `&[u8]`, `Vec<u8>`, `[u8; N]`, `Cow<[u8]>`, `uuid::Uuid`, and everything accepted for text |
+| `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue`, and text (it must be valid JSON) |
+| `DATE` | `chrono::NaiveDate`, `time::Date`, and the datetime types |
+| `DATETIME`, `TIMESTAMP` | `NaiveDateTime`, `DateTime<Utc \| FixedOffset \| Local>`, `time::PrimitiveDateTime`, `time::OffsetDateTime`, and the date types |
+| `TIME` | `chrono::TimeDelta`, `NaiveTime`, `time::Time`, `time::Duration`, `std::time::Duration` |
+| `GEOMETRY`, or a position the macros don't analyse | anything that implements `Encode` |
+
+**When the value has another type.** For example, an id that arrives as a `String`:
+
+1. **Convert in Rust (preferred).** The error then surfaces where the input is parsed:
+   ```rust
+   let id: i64 = id.parse()?;
+   query!("SELECT name FROM users WHERE id = ?", id)
+   ```
+   Likewise `NaiveDate::parse_from_str(s, "%Y-%m-%d")?`, `serde_json::from_str(s)?`, and
+   `Uuid::parse_str(s)?`.
+2. **Convert in SQL.** A `?` inside a function call is not checked, and TiDB converts explicitly:
+   ```rust
+   query!("SELECT name FROM users WHERE id = CAST(? AS SIGNED)", id_text)
+   ```
+   Other conversions: `STR_TO_DATE(?, '%Y-%m-%d')`, `CAST(? AS JSON)`, `UNHEX(?)`,
+   `FROM_UNIXTIME(?)`. Unlike an implicit conversion, an explicit one fails or warns predictably.
+3. **Skip the check for one argument:** `query!("… WHERE id = ?", id_text as _)`. TiDB then
+   converts implicitly at runtime, with the hazards described above.
+4. **A domain type:** implement `Type` and `Encode` by hand. A type tisqlx can't classify is not
+   checked; use `#[derive(Type)]` instead to be checked like the inner type.
+5. **No compile-time check at all:** the runtime API, `tisqlx::query("…").bind(v)`.
 
 **Offline builds (CI):** run `tisqlx prepare` with a database available and commit
 `.tisqlx/`. Then build with `TISQLX_OFFLINE=true`. `tisqlx prepare --check` fails when the
@@ -105,15 +166,30 @@ data is stale.
 | `VECTOR` (TiDB 8.4+) | `types::Vector` (`Vec<f32>`) | |
 | `DATE` | `chrono::NaiveDate`, `time::Date` | `chrono`, `time` |
 | `DATETIME` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` | `chrono`, `time` |
-| `TIMESTAMP` | `chrono::DateTime<Utc>`, `time::OffsetDateTime` (UTC session) | `chrono`, `time` |
+| `TIMESTAMP` (or `DATETIME`) as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>`, `time::OffsetDateTime` | `chrono`, `time` |
 | `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0); `NaiveTime`/`time::Time` within a day | |
 | `BINARY(16)`, `CHAR(36)` | `uuid::Uuid` (bytes or text), `uuid::fmt::Hyphenated` (text) | `uuid` |
 
 Defaults: `macros`, `chrono`, `decimal`. The query macros infer chrono types when `chrono` is on,
 else `time`. They infer `Decimal`, or `BigDecimal` for columns wider than 28 digits when
 `bigdecimal` is on. `SET` columns become `types::Set`. UUIDs have no column type of their own, so
-use an override such as `` AS `id: Uuid` ``. `DateTime<Utc>`/`OffsetDateTime` assume the session
-time zone is UTC, which is the default `timezone` option.
+use an override such as `` AS `id: Uuid` ``.
+
+**Time zones.** TiDB sends and receives DATETIME and TIMESTAMP values as wall times in the
+session `time_zone`. Naive types (`NaiveDateTime`, `PrimitiveDateTime`) are those wall times
+as they are. Instant types (`DateTime<…>`, `OffsetDateTime`) are converted from and to the
+session zone on the client, using the system time zone database:
+- **Default (`timezone=+00:00`):** a UTC session, so no conversion and no loss.
+- **`timezone=Europe/Paris`, `timezone=server`, …:** values are converted, and decoded values
+  carry the session offset (`FixedOffset`, `OffsetDateTime`). Around daylight-saving changes
+  a wall time is ambiguous or doesn't exist. TiDB itself then stores a TIMESTAMP one hour off,
+  and tisqlx decodes exactly as TiDB interprets it. Keep the UTC default to store instants
+  losslessly.
+- **The zone is read when the connection opens,** and again after a pool's `after_connect` hook.
+  TiDB doesn't report later changes, so after a raw `SET time_zone` call
+  `TiConnection::reload_time_zone()`.
+- **A zone missing from the client's database** (e.g. a container without tzdata) makes
+  instant types fail with an error. Naive types keep working.
 
 ## Authentication and TLS
 

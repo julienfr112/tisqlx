@@ -1,0 +1,46 @@
+{
+  "query": "INSERT INTO posts (user_id, title, body) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    {
+      "type": "LongLong",
+      "flags": 4105,
+      "charset": 63,
+      "max_size": 20
+    },
+    {
+      "type": "VarString",
+      "flags": 4097,
+      "charset": 46,
+      "max_size": 800
+    },
+    {
+      "type": "Blob",
+      "flags": 0,
+      "charset": 46,
+      "max_size": 262140
+    }
+  ]
+}

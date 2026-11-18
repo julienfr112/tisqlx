@@ -5,7 +5,7 @@
 //! queries needs the dedicated test TiDB (`TISQLX_TEST_URL`), else they are skipped.
 
 use tisqlx::types::Decimal;
-use tisqlx::types::chrono::NaiveDateTime;
+use tisqlx::types::chrono::{NaiveDate, NaiveDateTime};
 use tisqlx::{FromRow, Pool};
 
 static MIGRATOR: tisqlx::migrate::Migrator = tisqlx::migrate!("tests/migrations");
@@ -225,4 +225,98 @@ fn migrate_macro_zero_padded_filenames() {
     for (a, b) in m.migrations.iter().zip(runtime.migrations.iter()) {
         assert_eq!(a.checksum, b.checksum, "embedded and runtime checksums agree");
     }
+}
+
+#[derive(Debug, tisqlx::Type)]
+struct UserId(i64);
+
+/// A type with hand-written impls: tisqlx cannot classify it, so binding it is never rejected.
+struct Shouted(&'static str);
+
+impl tisqlx::Type for Shouted {
+    fn type_info() -> tisqlx::TypeInfo {
+        <str as tisqlx::Type>::type_info()
+    }
+}
+
+impl tisqlx::Encode for Shouted {
+    fn encode(&self, buf: &mut Vec<u8>) -> Result<tisqlx::IsNull, tisqlx::error::BoxDynError> {
+        tisqlx::Encode::encode(self.0.to_uppercase().as_str(), buf)
+    }
+}
+
+impl<'r> tisqlx::Decode<'r> for Shouted {
+    fn decode(_: tisqlx::ValueRef<'r>) -> Result<Self, tisqlx::error::BoxDynError> {
+        Ok(Shouted("decoded"))
+    }
+}
+
+/// A derived newtype over an unclassified type: unclassified too, so never rejected.
+#[derive(tisqlx::Type)]
+struct Loud(Shouted);
+
+/// Generic arguments cannot be classified: never rejected.
+fn by_name<T: tisqlx::Encode + Sync>(name: T) -> impl Sync {
+    tisqlx::query!("SELECT id FROM users WHERE name = ?", name)
+}
+
+/// Bind arguments are checked against the column next to their `?`, by kind (number, text,
+/// date, ...), not by exact Rust type. Compiling this is most of the test; the rejected cases
+/// are in `tests/ui-query/bind_types.rs`.
+#[tokio::test]
+async fn bind_arguments_of_compatible_types() {
+    let Some(pool) = pool().await else { return };
+    let mut tx = pool.begin().await.unwrap();
+    let since = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap();
+    let n: i64 = tisqlx::query_scalar!(
+        "SELECT COUNT(*) FROM users WHERE id > ? AND name <> ? AND email <=> ? AND score >= ? AND status IN (?, ?) AND created_at >= ? LIMIT ?",
+        // any integer for BIGINT and DECIMAL, `Option`, `&str`, a derived enum, a date for DATETIME
+        0i32,
+        "nobody",
+        None::<String>,
+        0u8,
+        Status::Active,
+        Status::Banned,
+        since,
+        10u8
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert!(n >= 0);
+    // text for JSON, a newtype like its field, an unclassified type, and `as _` to opt out
+    tisqlx::query!(
+        "UPDATE users SET profile = ?, email = ? WHERE id = ? OR name = ? OR id = ?",
+        r#"{"a": 1}"#,
+        Some(String::from("x")),
+        UserId(-1),
+        Shouted("nobody"),
+        "-1" as _
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    // unsuffixed literals, and unclassified values
+    tisqlx::query!("UPDATE users SET score = ? WHERE id = ? OR name = ?", 2.5, 5, Loud(Shouted("x")))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let _ = by_name("x");
+    // Explicit conversion in SQL: a `?` inside a function call is not checked (README workaround).
+    let id_text = String::from("-1");
+    let found: Option<i64> = tisqlx::query_scalar!("SELECT id FROM users WHERE id = CAST(? AS SIGNED)", id_text)
+        .fetch_optional(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(found, None);
+    tisqlx::query!(
+        "INSERT INTO posts (user_id, title, body) VALUES (?, ?, ?)",
+        1u32,
+        "t".to_owned(),
+        Option::<&str>::None
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.rollback().await.unwrap();
 }

@@ -2,7 +2,7 @@
 
 use time::{Date, Duration, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
-use super::temporal::{DateTimeParts, TimeParts, is_date_or_datetime, is_datetime};
+use super::temporal::{DateTimeParts, TimeParts, decode_instant, instant_param, is_date_or_datetime, is_datetime};
 use crate::decode::Decode;
 use crate::encode::{Encode, IsNull};
 use crate::error::BoxDynError;
@@ -23,8 +23,11 @@ fn date(p: &DateTimeParts) -> Result<Date, BoxDynError> {
 }
 
 fn primitive(value: &ValueRef<'_>) -> Result<PrimitiveDateTime, BoxDynError> {
-    let p = DateTimeParts::decode(value)?;
-    Ok(PrimitiveDateTime::new(date(&p)?, Time::from_hms_micro(p.hour, p.minute, p.second, p.micros)?))
+    from_parts(&DateTimeParts::decode(value)?)
+}
+
+fn from_parts(p: &DateTimeParts) -> Result<PrimitiveDateTime, BoxDynError> {
+    Ok(PrimitiveDateTime::new(date(p)?, Time::from_hms_micro(p.hour, p.minute, p.second, p.micros)?))
 }
 
 fn duration(value: &ValueRef<'_>) -> Result<Duration, BoxDynError> {
@@ -82,8 +85,8 @@ impl<'r> Decode<'r> for PrimitiveDateTime {
     }
 }
 
-/// TIMESTAMP, assuming a UTC session time zone (the tisqlx default), like `DateTime<Utc>`.
-/// Values with another offset are converted to UTC when encoded.
+/// An instant, like `chrono::DateTime<Utc>`: converted from and to the session `time_zone`
+/// (see `TiConnection::reload_time_zone`). Decoded values carry the session's offset at that instant.
 impl Type for OffsetDateTime {
     fn type_info() -> TypeInfo {
         TypeInfo::new(ColumnType::Timestamp)
@@ -102,13 +105,14 @@ impl Encode for OffsetDateTime {
     }
 
     fn produces(&self) -> TypeInfo {
-        TypeInfo::new(ColumnType::Datetime)
+        instant_param()
     }
 }
 
 impl<'r> Decode<'r> for OffsetDateTime {
     fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(primitive(&value)?.assume_utc())
+        let (utc, offset) = decode_instant(&value)?;
+        Ok(from_parts(&utc)?.assume_utc().to_offset(UtcOffset::from_whole_seconds(offset)?))
     }
 }
 

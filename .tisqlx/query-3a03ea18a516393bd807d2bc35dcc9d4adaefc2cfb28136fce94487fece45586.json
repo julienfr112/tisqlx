@@ -1,0 +1,32 @@
+{
+  "query": "SELECT id FROM users WHERE id = CAST(? AS SIGNED)",
+  "describe": {
+    "columns": [
+      {
+        "schema": "tisqlx_macros",
+        "table": "users",
+        "org_table": "users",
+        "name": "id",
+        "org_name": "id",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 4099,
+          "charset": 63,
+          "max_size": 20
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    null
+  ]
+}

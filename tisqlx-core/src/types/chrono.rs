@@ -1,8 +1,8 @@
 //! `chrono` types. The wire format lives in [`super::temporal`].
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Timelike, Utc};
 
-use super::temporal::{DateTimeParts, TimeParts, is_date_or_datetime, is_datetime};
+use super::temporal::{DateTimeParts, TimeParts, decode_instant, instant_param, is_date_or_datetime, is_datetime};
 use crate::decode::Decode;
 use crate::encode::{Encode, IsNull};
 use crate::error::BoxDynError;
@@ -26,10 +26,13 @@ fn naive_date(p: &DateTimeParts) -> Result<NaiveDate, BoxDynError> {
 }
 
 fn naive_datetime(value: &ValueRef<'_>) -> Result<NaiveDateTime, BoxDynError> {
-    let p = DateTimeParts::decode(value)?;
+    from_parts(&DateTimeParts::decode(value)?)
+}
+
+fn from_parts(p: &DateTimeParts) -> Result<NaiveDateTime, BoxDynError> {
     let time = NaiveTime::from_hms_micro_opt(p.hour as u32, p.minute as u32, p.second as u32, p.micros)
         .ok_or("invalid time of day")?;
-    Ok(naive_date(&p)?.and_time(time))
+    Ok(naive_date(p)?.and_time(time))
 }
 
 fn time_delta(value: &ValueRef<'_>) -> Result<TimeDelta, BoxDynError> {
@@ -93,39 +96,49 @@ impl<'r> Decode<'r> for NaiveDateTime {
     }
 }
 
-// ---- DateTime<Utc>
+// ---- DateTime<Tz>: instants
 //
-// TIMESTAMP values travel in the *session* time zone in both directions, so these
-// impls are only correct while it is UTC: the default `timezone` connect option
-// (`+00:00`). With another session zone, use `NaiveDateTime` and convert yourself.
+// DATETIME and TIMESTAMP values travel as wall times in the session `time_zone`; the connection
+// converts them from and to UTC (see `TiConnection::reload_time_zone`). Decoded values carry
+// the session's offset at that instant (`FixedOffset`), or the client's zone (`Local`).
 
-impl Type for DateTime<Utc> {
-    fn type_info() -> TypeInfo {
-        TypeInfo::new(ColumnType::Timestamp)
-    }
+macro_rules! instant {
+    ($ty:ty, |$utc:ident, $offset:ident| $decode:expr) => {
+        impl Type for $ty {
+            fn type_info() -> TypeInfo {
+                TypeInfo::new(ColumnType::Timestamp)
+            }
 
-    fn compatible(ty: &TypeInfo) -> bool {
-        is_datetime(ty)
-    }
+            fn compatible(ty: &TypeInfo) -> bool {
+                is_datetime(ty)
+            }
+        }
+
+        impl Encode for $ty {
+            fn encode(&self, buf: &mut Vec<u8>) -> Result<IsNull, BoxDynError> {
+                datetime_parts(&self.naive_utc())?.encode_datetime(buf);
+                Ok(IsNull::No)
+            }
+
+            fn produces(&self) -> TypeInfo {
+                instant_param()
+            }
+        }
+
+        impl<'r> Decode<'r> for $ty {
+            fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
+                let (parts, $offset) = decode_instant(&value)?;
+                let $utc = from_parts(&parts)?.and_utc();
+                Ok($decode)
+            }
+        }
+    };
 }
 
-impl Encode for DateTime<Utc> {
-    fn encode(&self, buf: &mut Vec<u8>) -> Result<IsNull, BoxDynError> {
-        datetime_parts(&self.naive_utc())?.encode_datetime(buf);
-        Ok(IsNull::No)
-    }
-
-    fn produces(&self) -> TypeInfo {
-        // A plain datetime literal; the server interprets it in the session zone (UTC).
-        TypeInfo::new(ColumnType::Datetime)
-    }
-}
-
-impl<'r> Decode<'r> for DateTime<Utc> {
-    fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
-        Ok(naive_datetime(&value)?.and_utc())
-    }
-}
+instant!(DateTime<Utc>, |utc, _offset| utc);
+instant!(DateTime<FixedOffset>, |utc, offset| utc
+    .with_timezone(&FixedOffset::east_opt(offset).ok_or("invalid offset")?));
+instant!(DateTime<Local>, |utc, _offset| utc.with_timezone(&Local));
 
 // ---- NaiveTime (00:00..24:00) / TimeDelta (any TIME, which may be negative or exceed 24h)
 

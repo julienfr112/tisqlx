@@ -67,5 +67,13 @@
         "max_size": 0
       }
     ]
-  }
+  },
+  "param_types": [
+    {
+      "type": "LongLong",
+      "flags": 4099,
+      "charset": 63,
+      "max_size": 20
+    }
+  ]
 }

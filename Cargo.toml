@@ -32,6 +32,8 @@ uuid = { version = "1", default-features = false, features = ["std"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 webpki-roots = "1"
 log = "0.4"
+# Session time zones for instant types; system tzdata, bundled only where there is none (Windows).
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo", "tzdb-bundle-platform"] }
 syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"

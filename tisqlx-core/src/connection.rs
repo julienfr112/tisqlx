@@ -20,6 +20,7 @@ use crate::protocol::{self, ColumnDefinition, Handshake, OkPacket, PrepareOk, ca
 use crate::row::{Column, ResultColumns, Row, RowFormat};
 use crate::tidb::TiDbVersion;
 use crate::type_info::TypeInfo;
+use crate::tz::SessionZone;
 use crate::util::{quote_ident, quote_str};
 
 /// The result of executing a statement.
@@ -138,6 +139,8 @@ pub struct TiConnection {
     pub(crate) rollback_to: Option<usize>,
     /// May hold `GET_LOCK` locks taken by tisqlx (the migrator), e.g. after a cancelled run.
     pub(crate) user_locks: bool,
+    /// Session `time_zone`, for instant types.
+    zone: SessionZone,
 }
 
 impl fmt::Debug for TiConnection {
@@ -293,6 +296,7 @@ impl TiConnection {
             transaction_depth: 0,
             rollback_to: None,
             user_locks: false,
+            zone: SessionZone::Utc,
         };
         conn.after_connect(options).await?;
         Ok(conn)
@@ -322,6 +326,25 @@ impl TiConnection {
             sql.push_str(&format!("; SET RESOURCE GROUP {}", quote_ident(group)));
         }
         self.execute_raw(&sql).await?;
+        #[cfg(any(feature = "chrono", feature = "time"))]
+        if !options.timezone.as_deref().is_some_and(|tz| SessionZone::resolve(tz, None).is_utc()) {
+            self.reload_time_zone().await?;
+        }
+        Ok(())
+    }
+
+    /// Re-read the session `time_zone`, which instant types (`DateTime<Utc>`, `OffsetDateTime`,
+    /// ...) are converted to and from.
+    ///
+    /// It is read when the connection opens (and after a pool's `after_connect` hook). TiDB does
+    /// not report later changes, so call this after changing it with a raw `SET time_zone`.
+    pub async fn reload_time_zone(&mut self) -> Result<()> {
+        #[cfg(any(feature = "chrono", feature = "time"))]
+        {
+            let row = crate::query::raw_sql("SELECT @@time_zone, @@system_time_zone").fetch_one(&mut *self).await?;
+            let (tz, system): (String, Option<String>) = (row.try_get(0)?, row.try_get(1)?);
+            self.zone = SessionZone::resolve(&tz, system.as_deref());
+        }
         Ok(())
     }
 
@@ -691,7 +714,20 @@ impl TiConnection {
                 p.put_u8(ty.r#type as u8);
                 p.put_u8(if ty.is_unsigned() { 0x80 } else { 0 });
             }
+            let values = p.len();
             p.extend_from_slice(&args.values);
+            if !self.zone.is_utc() {
+                for &at in &args.instants {
+                    let slot = &mut p[values + at..];
+                    let local = crate::types::temporal::DateTimeParts::decode_binary(slot)
+                        .and_then(|utc| self.zone.utc_to_local(utc))
+                        .map_err(Error::Encode)?;
+                    let mut buf = Vec::with_capacity(12);
+                    local.encode_datetime(&mut buf);
+                    // Same fractional seconds, so the same length (7 or 11 bytes + length byte).
+                    slot[..buf.len()].copy_from_slice(&buf);
+                }
+            }
         }
         self.command(&p).await
     }
@@ -827,7 +863,13 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
                         RowFormat::Text => decode_text_row(&payload, self.columns.columns.len())?,
                     };
                     self.yielded = true;
-                    return Ok(Some(Step::Row(Row::new(payload, ranges, format, self.columns.clone()))));
+                    return Ok(Some(Step::Row(Row::new(
+                        payload,
+                        ranges,
+                        format,
+                        self.columns.clone(),
+                        conn.zone.clone(),
+                    ))));
                 }
             }
         }

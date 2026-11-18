@@ -1,0 +1,121 @@
+{
+  "query": "SELECT COUNT(*) FROM users WHERE id > ? AND name <> ? AND email <=> ? AND score >= ? AND status IN (?, ?) AND created_at >= ? LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "schema": "",
+        "table": "",
+        "org_table": "",
+        "name": "COUNT(*)",
+        "org_name": "",
+        "type_info": {
+          "type": "LongLong",
+          "flags": 129,
+          "charset": 63,
+          "max_size": 21
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    {
+      "type": "LongLong",
+      "flags": 4099,
+      "charset": 63,
+      "max_size": 20
+    },
+    {
+      "type": "VarString",
+      "flags": 4097,
+      "charset": 46,
+      "max_size": 256
+    },
+    {
+      "type": "VarString",
+      "flags": 0,
+      "charset": 46,
+      "max_size": 1020
+    },
+    {
+      "type": "NewDecimal",
+      "flags": 1,
+      "charset": 63,
+      "max_size": 12
+    },
+    {
+      "type": "String",
+      "flags": 257,
+      "charset": 46,
+      "max_size": 24
+    },
+    {
+      "type": "String",
+      "flags": 257,
+      "charset": 46,
+      "max_size": 24
+    },
+    {
+      "type": "Datetime",
+      "flags": 129,
+      "charset": 63,
+      "max_size": 26
+    },
+    {
+      "type": "LongLong",
+      "flags": 32,
+      "charset": 63,
+      "max_size": 0
+    }
+  ]
+}

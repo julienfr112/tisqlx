@@ -10,6 +10,8 @@ pub struct Arguments {
     pub(crate) types: Vec<TypeInfo>,
     pub(crate) values: Vec<u8>,
     nulls: Vec<bool>,
+    /// Offsets in `values` of UTC instants, converted to the session zone at execute time.
+    pub(crate) instants: Vec<usize>,
     pub(crate) error: Option<Error>,
 }
 
@@ -23,7 +25,12 @@ impl Arguments {
         let ty = value.produces();
         let start = self.values.len();
         match value.encode(&mut self.values) {
-            Ok(IsNull::No) => self.nulls.push(false),
+            Ok(IsNull::No) => {
+                if crate::types::temporal::is_instant_param(&ty) {
+                    self.instants.push(start);
+                }
+                self.nulls.push(false);
+            }
             Ok(IsNull::Yes) => {
                 self.values.truncate(start);
                 self.nulls.push(true);

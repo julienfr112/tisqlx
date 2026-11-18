@@ -12,7 +12,7 @@ use crate::encode::{Encode, IsNull};
 use crate::error::BoxDynError;
 use crate::protocol::buf::Reader;
 use crate::row::{RowFormat, ValueRef};
-use crate::type_info::{ColumnType, TypeInfo};
+use crate::type_info::{ColumnFlags, ColumnType, TypeInfo};
 use crate::types::Type;
 
 pub(crate) fn is_datetime(ty: &TypeInfo) -> bool {
@@ -21,6 +21,26 @@ pub(crate) fn is_datetime(ty: &TypeInfo) -> bool {
 
 pub(crate) fn is_date_or_datetime(ty: &TypeInfo) -> bool {
     ty.r#type == ColumnType::Date || is_datetime(ty)
+}
+
+/// The parameter type of instant types (`DateTime<Utc>`, `OffsetDateTime`, ...): sent as a
+/// DATETIME, tagged so the connection converts it from UTC to the session zone at execute time.
+pub(crate) const fn instant_param() -> TypeInfo {
+    let mut ty = TypeInfo::new(ColumnType::Datetime);
+    ty.flags = ColumnFlags(ColumnFlags::TIMESTAMP);
+    ty
+}
+
+/// Whether a bind parameter holds a UTC instant (see [`instant_param`]); a wrapper that does
+/// not forward `produces` still declares the TIMESTAMP type of its inner instant type.
+pub(crate) fn is_instant_param(ty: &TypeInfo) -> bool {
+    ty.r#type == ColumnType::Timestamp
+        || (ty.r#type == ColumnType::Datetime && ty.flags.contains(ColumnFlags::TIMESTAMP))
+}
+
+/// Decode a DATETIME/TIMESTAMP as an instant: (UTC wall time, session UTC offset in seconds).
+pub(crate) fn decode_instant(value: &ValueRef<'_>) -> Result<(DateTimeParts, i32), BoxDynError> {
+    value.zone.local_to_utc(DateTimeParts::decode(value)?)
 }
 
 /// A calendar date and time of day, as TiDB sends and receives it.
@@ -78,7 +98,7 @@ impl DateTimeParts {
         Ok(parts)
     }
 
-    fn decode_binary(b: &[u8]) -> Result<Self, BoxDynError> {
+    pub fn decode_binary(b: &[u8]) -> Result<Self, BoxDynError> {
         let mut r = Reader::new(b);
         let len = r.u8()?;
         let mut p = Self::default();

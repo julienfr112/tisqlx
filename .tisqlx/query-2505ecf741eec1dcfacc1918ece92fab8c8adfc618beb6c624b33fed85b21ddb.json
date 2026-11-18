@@ -22,5 +22,25 @@
         "max_size": 0
       }
     ]
-  }
+  },
+  "param_types": [
+    {
+      "type": "VarString",
+      "flags": 4097,
+      "charset": 46,
+      "max_size": 256
+    },
+    {
+      "type": "VarString",
+      "flags": 0,
+      "charset": 46,
+      "max_size": 1020
+    },
+    {
+      "type": "NewDecimal",
+      "flags": 1,
+      "charset": 63,
+      "max_size": 12
+    }
+  ]
 }

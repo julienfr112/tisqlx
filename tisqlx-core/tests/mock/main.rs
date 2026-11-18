@@ -235,7 +235,7 @@ async fn pool_resets_connection_returned_mid_result() {
     // transaction to the next borrower unless the pool drains and rolls back.
     let mock = Mock::start(|mut c: Conn| async move {
         c.accept().await;
-        c.expect(PING, None).await; // test_before_acquire on the idle connection
+        c.expect(PING, None).await; // ping_after_idle(ZERO): ping on every checkout
         c.ok(0, 0, AUTOCOMMIT).await;
         c.expect(QUERY, Some("SELECT 1; BEGIN")).await;
         c.columns(&[("1", LONGLONG, 0)]).await;
@@ -249,7 +249,7 @@ async fn pool_resets_connection_returned_mid_result() {
         c.ok(0, 0, AUTOCOMMIT).await;
     })
     .await;
-    let pool = PoolOptions::new().max_connections(1).connect(&mock.url).await.unwrap();
+    let pool = PoolOptions::new().max_connections(1).ping_after_idle(Duration::ZERO).connect(&mock.url).await.unwrap();
     {
         let mut conn = pool.acquire().await.unwrap();
         let mut s = raw_sql("SELECT 1; BEGIN").fetch(&mut *conn);
@@ -322,8 +322,6 @@ async fn failed_savepoint_rollback_aborts_the_whole_transaction() {
 async fn hung_reset_is_abandoned_and_frees_its_slot() {
     let mock = Mock::start(|mut c: Conn| async move {
         c.accept().await;
-        c.expect(PING, None).await;
-        c.ok(0, 0, AUTOCOMMIT).await;
         c.expect(QUERY, Some("BEGIN")).await;
         c.ok(0, 0, AUTOCOMMIT | IN_TRANS).await;
         c.expect(QUERY, Some("ROLLBACK")).await;
@@ -351,8 +349,6 @@ async fn retried_transaction_rolls_back_before_the_next_attempt() {
     let mock = Mock::start(|mut c: Conn| async move {
         c.accept().await;
         for attempt in 0..2 {
-            c.expect(PING, None).await;
-            c.ok(0, 0, AUTOCOMMIT).await;
             c.expect(QUERY, Some("BEGIN OPTIMISTIC")).await;
             c.ok(0, 0, AUTOCOMMIT | IN_TRANS).await;
             c.expect(QUERY, Some("UPDATE t SET v = v + 1")).await;
@@ -403,8 +399,6 @@ async fn migration_lock_is_released_when_release_lock_fails() {
     // the connection goes back to the pool and must be cleaned with RELEASE_ALL_LOCKS().
     let mock = Mock::start(|mut c: Conn| async move {
         c.accept().await;
-        c.expect(PING, None).await;
-        c.ok(0, 0, AUTOCOMMIT).await;
         prepared_one_row(&mut c, "SELECT DATABASE()", 0, ("db", VAR_STRING), b"db").await;
         prepared_one_row(&mut c, "SELECT GET_LOCK(?, ?)", 2, ("l", LONGLONG), &1u64.to_le_bytes()).await;
         c.expect(QUERY, None).await; // CREATE TABLE IF NOT EXISTS
@@ -423,8 +417,6 @@ async fn migration_lock_is_released_when_release_lock_fails() {
         c.columns(&[("n", LONGLONG, 0)]).await;
         c.text_row(&[Some("1")]).await;
         c.end_rows(AUTOCOMMIT).await;
-        c.expect(PING, None).await; // next acquire
-        c.ok(0, 0, AUTOCOMMIT).await;
     })
     .await;
     let pool = PoolOptions::new().max_connections(1).connect(&mock.url).await.unwrap();
@@ -432,5 +424,23 @@ async fn migration_lock_is_released_when_release_lock_fails() {
     assert!(m.run(&pool).await.is_err(), "RELEASE_LOCK failed");
     let conn = tokio::time::timeout(Duration::from_secs(5), pool.acquire()).await.unwrap().unwrap();
     drop(conn);
+    mock.finish().await;
+}
+
+#[tokio::test]
+async fn recently_returned_connection_is_not_pinged() {
+    // Default `ping_after_idle` (30 s): a connection idle for less than that is handed out as is.
+    let mock = Mock::start(|mut c: Conn| async move {
+        c.accept().await;
+        c.expect(QUERY, Some("SELECT 1")).await;
+        c.columns(&[("1", LONGLONG, 0)]).await;
+        c.text_row(&[Some("1")]).await;
+        c.end_rows(AUTOCOMMIT).await;
+    })
+    .await;
+    let pool = PoolOptions::new().max_connections(1).connect(&mock.url).await.unwrap();
+    drop(pool.acquire().await.unwrap());
+    let mut conn = pool.acquire().await.unwrap();
+    raw_sql("SELECT 1").fetch_one(&mut *conn).await.unwrap();
     mock.finish().await;
 }

@@ -62,6 +62,25 @@ pub fn rust_type_for(ty: &TypeInfo) -> Result<TokenStream, String> {
     })
 }
 
+/// The `tisqlx::bind_check::col` kind a bind argument for a parameter matched against a column
+/// of this type must be compatible with; `None` leaves it unchecked.
+pub fn bind_column_kind(ty: &TypeInfo) -> Option<proc_macro2::Ident> {
+    use ColumnType::*;
+    let kind = match ty.r#type {
+        Tiny | Short | Long | Int24 | LongLong | Year | Bit | Float | Double | Decimal | NewDecimal => "Numeric",
+        Json => "Json",
+        Date => "Date",
+        Datetime | Timestamp => "DateTime",
+        Time => "Time",
+        Enum | Set => "Text",
+        String if ty.flags.contains(ColumnFlags::SET) || ty.flags.contains(ColumnFlags::ENUM) => "Text",
+        VarChar | VarString | String | TinyBlob | MediumBlob | LongBlob | Blob if ty.is_binary() => "Bytes",
+        VarChar | VarString | String | TinyBlob | MediumBlob | LongBlob | Blob => "Text",
+        Geometry | Null => return None,
+    };
+    Some(proc_macro2::Ident::new(kind, proc_macro2::Span::call_site()))
+}
+
 #[cfg(test)]
 mod tests {
     //! The macros pick a Rust type per column type; the runtime then checks

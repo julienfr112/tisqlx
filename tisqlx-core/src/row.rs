@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 use crate::protocol::row::Ranges;
 use crate::type_info::TypeInfo;
 use crate::types::Type;
+use crate::tz::SessionZone;
 
 pub use crate::protocol::ColumnDefinition as Column;
 
@@ -50,6 +51,8 @@ pub struct ValueRef<'r> {
     pub(crate) bytes: Option<&'r [u8]>,
     pub(crate) format: RowFormat,
     pub(crate) type_info: &'r TypeInfo,
+    #[cfg_attr(not(any(feature = "chrono", feature = "time")), allow(dead_code))]
+    pub(crate) zone: &'r SessionZone,
 }
 
 impl<'r> ValueRef<'r> {
@@ -92,11 +95,18 @@ pub struct Row {
     values: Ranges,
     format: RowFormat,
     columns: Arc<ResultColumns>,
+    zone: SessionZone,
 }
 
 impl Row {
-    pub(crate) fn new(data: Vec<u8>, values: Ranges, format: RowFormat, columns: Arc<ResultColumns>) -> Self {
-        Self { data, values, format, columns }
+    pub(crate) fn new(
+        data: Vec<u8>,
+        values: Ranges,
+        format: RowFormat,
+        columns: Arc<ResultColumns>,
+        zone: SessionZone,
+    ) -> Self {
+        Self { data, values, format, columns, zone }
     }
 
     pub fn len(&self) -> usize {
@@ -128,6 +138,7 @@ impl Row {
             bytes: self.values[i].clone().map(|r| &self.data[r]),
             format: self.format,
             type_info: &self.columns.columns[i].type_info,
+            zone: &self.zone,
         }
     }
 
