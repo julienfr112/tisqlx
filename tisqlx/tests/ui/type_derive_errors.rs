@@ -21,4 +21,8 @@ enum Generic<const N: usize> {
     A,
 }
 
+#[derive(tisqlx::Type)]
+#[tisqlx(rename_all = "snake_case")]
+struct Renamed(i32);
+
 fn main() {}

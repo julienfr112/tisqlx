@@ -10,6 +10,12 @@ pub fn expand_derive_from_row(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
     let container = container_attrs(&input.attrs)?;
     let ident = &input.ident;
+    if container.rename_all.is_some() && !matches!(data.fields, Fields::Named(_)) {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "`rename_all` has no effect here: tuple fields are read by position, not by column name",
+        ));
+    }
 
     // The row lifetime: the struct's own first lifetime (`struct User<'a> { name: &'a str }`
     // borrows from the row), else a new `'r`.

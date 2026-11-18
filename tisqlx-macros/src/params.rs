@@ -835,6 +835,12 @@ mod tests {
         assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND ? = b"), s(&[None]));
         assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND b IN (?)"), s(&[None]));
         assert_eq!(sites("SELECT a FROM t WHERE a BETWEEN 1 AND b BETWEEN ? AND ?"), s(&[None, None]));
+        assert_eq!(sites("SELECT a FROM t WHERE a NOT BETWEEN ? AND b = ?"), s(&[None, None]));
+        // parentheses close the BETWEEN
+        assert_eq!(
+            sites("SELECT a FROM t WHERE (a BETWEEN ? AND ?) AND b = ? AND (c NOT BETWEEN 1 AND 2 OR d = ?)"),
+            s(&[Some("a"), Some("a"), Some("b"), Some("d")])
+        );
         // the next AND is a real one
         assert_eq!(
             sites("SELECT a FROM t WHERE a BETWEEN (1 + 1) AND 2 AND b = ? AND c BETWEEN ? AND ? AND d = ?"),

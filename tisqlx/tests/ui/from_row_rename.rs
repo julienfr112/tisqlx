@@ -18,4 +18,8 @@ struct Flattened {
     inner: Inner,
 }
 
+#[derive(tisqlx::FromRow)]
+#[tisqlx(rename_all = "camelCase")]
+struct RenamedTuple(i64);
+
 fn main() {}

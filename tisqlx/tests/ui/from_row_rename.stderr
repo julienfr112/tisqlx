@@ -17,3 +17,9 @@ error: `rename = "x"` has no effect here: tuple fields are read by position, and
 17 | /     #[tisqlx(flatten, rename = "x")]
 18 | |     inner: Inner,
    | |________________^
+
+error: `rename_all` has no effect here: tuple fields are read by position, not by column name
+  --> tests/ui/from_row_rename.rs:23:8
+   |
+23 | struct RenamedTuple(i64);
+   |        ^^^^^^^^^^^^

@@ -27,3 +27,9 @@ error: Type cannot be derived for a generic enum
    |
 20 | enum Generic<const N: usize> {
    |             ^^^^^^^^^^^^^^^^
+
+error: `rename_all` has no effect on a newtype: it renames the variants of an enum
+  --> tests/ui/type_derive_errors.rs:26:8
+   |
+26 | struct Renamed(i32);
+   |        ^^^^^^^

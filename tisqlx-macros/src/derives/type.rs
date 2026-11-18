@@ -25,6 +25,12 @@ pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
                     "Type can only be derived for a newtype (one field) or a fieldless enum",
                 ));
             }
+            if container.rename_all.is_some() {
+                return Err(syn::Error::new_spanned(
+                    ident,
+                    "`rename_all` has no effect on a newtype: it renames the variants of an enum",
+                ));
+            }
             let inner = &f.unnamed[0].ty;
             let bounded = |bound: TokenStream| {
                 let mut g = input.generics.clone();
