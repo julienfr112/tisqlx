@@ -67,7 +67,7 @@ impl Encode for NaiveDate {
 
 impl<'r> Decode<'r> for NaiveDate {
     fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
-        naive_date(&DateTimeParts::decode(&value)?)
+        naive_date(&DateTimeParts::decode_date(&value)?)
     }
 }
 

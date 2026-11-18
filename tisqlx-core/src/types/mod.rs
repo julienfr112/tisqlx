@@ -14,7 +14,7 @@
 //! | `SET` | [`Set`], `String` |
 //! | `JSON` | `serde_json::Value`, [`Json<T>`], `&serde_json::value::RawValue` |
 //! | `VECTOR` | [`Vector`] |
-//! | `DATE` | `chrono::NaiveDate`, `time::Date` |
+//! | `DATE` | `chrono::NaiveDate`, `time::Date` (also a `DATETIME`/`TIMESTAMP` value at midnight; another time of day is an error) |
 //! | `DATETIME`, `TIMESTAMP` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` (the wall time in the session zone) |
 //! | `TIMESTAMP`, `DATETIME` as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>`, `time::OffsetDateTime` (converted from and to the session zone) |
 //! | `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0), `chrono::NaiveTime`, `time::Time` (< 24h) |
@@ -22,6 +22,11 @@
 //! | `BIGINT UNSIGNED` | [`Tso`](crate::tidb::Tso) (TiDB timestamp oracle value) |
 //!
 //! Every type also decodes as `Option<T>` for nullable columns.
+//!
+//! A conversion that would lose something is a decode error, not a silent change: a fractional
+//! `DECIMAL` into an integer, a `DATETIME` with a time of day into a date type, a negative `TIME`
+//! into `std::time::Duration`. So is the zero date `0000-00-00` (which a non-strict `sql_mode`
+//! stores), for every date and datetime type and their `Option`: it is not NULL.
 
 use crate::type_info::TypeInfo;
 

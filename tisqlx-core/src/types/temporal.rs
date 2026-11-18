@@ -93,9 +93,24 @@ impl DateTimeParts {
             RowFormat::Text => Self::parse(value.as_str()?)?,
         };
         if parts.year == 0 && parts.month == 0 && parts.day == 0 {
-            return Err("zero date '0000-00-00' cannot be represented".into());
+            return Err("zero date '0000-00-00' is not a date (nor NULL: it is an error for an Option too)".into());
         }
         Ok(parts)
+    }
+
+    /// Decode into a date type. A DATETIME/TIMESTAMP value qualifies only at midnight: its
+    /// time of day is not dropped silently.
+    pub fn decode_date(value: &ValueRef<'_>) -> Result<Self, BoxDynError> {
+        let p = Self::decode(value)?;
+        if (p.hour, p.minute, p.second, p.micros) != (0, 0, 0, 0) {
+            return Err(format!(
+                "the value has a time of day ({:02}:{:02}:{:02}), which a date type would drop; decode a \
+                 datetime type, or select `DATE(column)`",
+                p.hour, p.minute, p.second
+            )
+            .into());
+        }
+        Ok(p)
     }
 
     pub fn decode_binary(b: &[u8]) -> Result<Self, BoxDynError> {
@@ -179,20 +194,25 @@ impl TimeParts {
 
     pub fn decode(value: &ValueRef<'_>) -> Result<Self, BoxDynError> {
         match value.format {
-            RowFormat::Binary => {
-                let mut r = Reader::new(value.as_bytes()?);
-                let len = r.u8()?;
-                if len == 0 {
-                    return Ok(Self::default());
-                }
-                let negative = r.u8()? != 0;
-                let days = r.u32()? as u64;
-                let (h, m, s) = (r.u8()? as u64, r.u8()? as u64, r.u8()? as u64);
-                let us = if len >= 12 { r.u32()? as u64 } else { 0 };
-                Ok(Self { negative, micros: micros_of(days * 24 + h, m, s, us).ok_or("TIME value out of range")? })
-            }
+            RowFormat::Binary => Self::decode_binary(value.as_bytes()?),
             RowFormat::Text => Self::parse(value.as_str()?),
         }
+    }
+
+    fn decode_binary(b: &[u8]) -> Result<Self, BoxDynError> {
+        let mut r = Reader::new(b);
+        let len = r.u8()?;
+        if len == 0 {
+            return Ok(Self::default());
+        }
+        let negative = r.u8()? != 0;
+        let days = r.u32()? as u64;
+        let (h, m, s) = (r.u8()? as u64, r.u8()? as u64, r.u8()? as u64);
+        let us = if len >= 12 { r.u32()? as u64 } else { 0 };
+        if h >= 24 || m >= 60 || s >= 60 || us >= 1_000_000 {
+            return Err(format!("invalid binary TIME {days}d {h}:{m}:{s}.{us}").into());
+        }
+        Ok(Self { negative, micros: micros_of(days * 24 + h, m, s, us).ok_or("TIME value out of range")? })
     }
 
     /// `[-]H:MM:SS[.ffffff]` (hours may exceed 24)
@@ -271,5 +291,21 @@ mod tests {
         assert!(TimeParts::parse("1:60:00").is_err());
         assert!(TimeParts::parse("1:00:00.1234567").is_err());
         assert!(TimeParts::parse("99999999999999:00:00").is_err());
+    }
+
+    /// The binary path rejects what the text path rejects.
+    #[test]
+    fn binary_time_fields_are_range_checked() {
+        let time = |h: u8, m: u8, s: u8, us: u32| {
+            let mut b = vec![12, 0, 1, 0, 0, 0, h, m, s];
+            b.extend_from_slice(&us.to_le_bytes());
+            TimeParts::decode_binary(&b)
+        };
+        assert_eq!(time(23, 59, 59, 999_999).unwrap().micros, (48 * 3600 - 1) * 1_000_000 + 999_999);
+        assert!(time(24, 0, 0, 0).is_err());
+        assert!(time(1, 60, 0, 0).is_err());
+        assert!(time(1, 0, 60, 0).is_err());
+        assert!(time(1, 0, 0, 1_000_000).is_err());
+        assert!(TimeParts::parse("1:60:00").is_err() && TimeParts::parse("1:00:60").is_err());
     }
 }

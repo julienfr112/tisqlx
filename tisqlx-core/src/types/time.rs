@@ -58,7 +58,7 @@ impl Encode for Date {
 
 impl<'r> Decode<'r> for Date {
     fn decode(value: ValueRef<'r>) -> Result<Self, BoxDynError> {
-        date(&DateTimeParts::decode(&value)?)
+        date(&DateTimeParts::decode_date(&value)?)
     }
 }
 
