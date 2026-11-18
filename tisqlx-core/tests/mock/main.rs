@@ -568,3 +568,18 @@ async fn no_hosts_is_a_configuration_error() {
     let err = ConnectOptions::new().hosts(Vec::<(String, u16)>::new()).connect().await.unwrap_err();
     assert!(matches!(err, Error::Configuration(_)), "{err}");
 }
+
+#[tokio::test]
+async fn empty_session_variable_name_is_a_configuration_error() {
+    // `?=x` in the URL: refused by the client, not sent as broken SQL.
+    let mock = Mock::start(|mut c: Conn| async move {
+        c.handshake("mysql_native_password", DEFAULT_CAPS).await;
+        c.recv().await.expect("handshake response");
+        c.ok(0, 0, AUTOCOMMIT).await;
+        assert_eq!(c.recv().await, None, "nothing may be sent");
+    })
+    .await;
+    let err = TiConnection::connect(&format!("{}&=x", mock.url)).await.unwrap_err();
+    assert!(matches!(err, Error::Configuration(_)), "{err}");
+    mock.finish().await;
+}

@@ -78,7 +78,7 @@ enum Phase {
     /// Expecting the EOF that follows the column definitions (servers without DEPRECATE_EOF).
     ColumnsEof,
     Rows,
-    /// A cancelled operation left the stream mid-packet or mid-handshake.
+    /// The stream position is unknown: a read or write was cancelled or failed half-way.
     Broken,
 }
 
@@ -373,7 +373,7 @@ impl TiConnection {
             sets.push(format!("tidb_txn_mode = '{}'", mode.as_str()));
         }
         for (name, value) in &options.session_vars {
-            if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') {
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.') {
                 return Err(Error::config(format!("invalid session variable name {name:?}")));
             }
             let is_plain = !value.is_empty()
@@ -436,7 +436,8 @@ impl TiConnection {
         self.status & status::IN_TRANS != 0
     }
 
-    /// `true` if the connection was left unusable by a cancelled operation.
+    /// `true` if the connection is unusable: an operation was cancelled while waiting for the
+    /// server, or failed with an I/O or protocol error.
     pub fn is_broken(&self) -> bool {
         self.phase == Phase::Broken
     }
@@ -958,5 +959,5 @@ fn timed_out() -> Error {
 const MAX_COLUMNS: usize = 4096;
 
 fn broken() -> Error {
-    Error::protocol("connection is in an unusable state after a cancelled operation")
+    Error::protocol("connection is in an unusable state after a cancelled or failed operation")
 }

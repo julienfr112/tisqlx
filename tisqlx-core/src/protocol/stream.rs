@@ -1,4 +1,4 @@
-//! Packet framing over a TCP (optionally TLS) socket.
+//! Packet framing over a TCP or Unix socket, optionally upgraded to TLS.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -60,7 +60,7 @@ impl AsyncWrite for Socket {
 pub(crate) struct PacketStream {
     // `Option` so the socket can be taken out for the TLS upgrade.
     inner: Option<BufStream<Socket>>,
-    pub(crate) seq: u8,
+    seq: u8,
     pub(crate) is_tls: bool,
 }
 

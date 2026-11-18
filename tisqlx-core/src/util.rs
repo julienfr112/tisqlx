@@ -1,4 +1,4 @@
-//! SQL quoting helpers.
+//! Small helpers: SQL quoting, hex encoding, jitter.
 
 /// Quote an identifier with backticks.
 pub fn quote_ident(ident: &str) -> String {
@@ -19,17 +19,6 @@ pub fn quote_str(s: &str) -> String {
     }
     out.push('\'');
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn quoting() {
-        assert_eq!(quote_ident("a`b"), "`a``b`");
-        assert_eq!(quote_str("it's \\"), "'it''s \\\\'");
-    }
 }
 
 /// Lowercase hexadecimal encoding.
@@ -58,9 +47,17 @@ pub(crate) fn random_u64() -> u64 {
 }
 
 #[cfg(test)]
-mod hex_tests {
+mod tests {
+    use super::*;
+
     #[test]
-    fn hex() {
-        assert_eq!(super::hex([0x00, 0xab, 0x7f]), "00ab7f");
+    fn quoting() {
+        assert_eq!(quote_ident("a`b"), "`a``b`");
+        assert_eq!(quote_str("it's \\"), "'it''s \\\\'");
+    }
+
+    #[test]
+    fn hex_encoding() {
+        assert_eq!(hex([0x00, 0xab, 0x7f]), "00ab7f");
     }
 }
