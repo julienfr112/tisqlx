@@ -149,8 +149,8 @@ were fixed by inspection only.
   the three conflict modes, a failed second batch, and all or nothing inside a transaction.
   `SHOW CONFIG` falls back to the 100 MB default of `txn-total-size-limit` when it isn't allowed.
 - **Several TiDB servers per pool:** unit `balance::tests` and URL parsing; mock (spread over two
-  servers, a dead one skipped, an unresponsive one only costs its share of the timeout, a wrong
-  password doesn't fail over); live (a dead host in the list, `localhost` with and without DNS
+  servers, a dead one skipped, an unresponsive one only costs its share of the timeout, a
+  connection lost during the TLS handshake fails over, a wrong password doesn't); live (a dead host in the list, `localhost` with and without DNS
   balancing); cluster (both TiDB nodes get connections).
 - **`Acquire`:** live `acquire_accepts_pools_connections_and_transactions`.
 - **`#[tisqlx::test]`, with migrations and fixtures:** `tisqlx/tests/test_attr.rs`, and

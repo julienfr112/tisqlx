@@ -85,6 +85,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 | `load-balance-dns` | `false` | see below |
 
 Any other key is set as a session variable, e.g. `?tidb_isolation_read_engines=tikv,tiflash`.
+Values are percent-decoded, and `+` is a literal plus (`timezone=+08:00`).
 
 **Several TiDB servers.** List them in the URL (`tidb://user@tidb-0:4000,tidb-1:4000,tidb-2/db`;
 hosts without a port use 4000) or with `ConnectOptions::hosts`.
@@ -253,7 +254,8 @@ session zone on the client, using the system time zone database:
 `mysql_native_password` works on every transport. TiDB has no RSA key exchange, so a
 `caching_sha2_password` account needs TLS or a Unix socket; tisqlx reports this clearly instead
 of failing with "access denied". The default `ssl-mode=preferred` uses TLS whenever the server
-offers it. Use `verify-identity` for TiDB Cloud.
+offers it. `preferred` and `required` encrypt without verifying the certificate, `verify-ca`
+verifies its chain, and `verify-identity` also its host name. Use `verify-identity` for TiDB Cloud.
 
 ## Tests with a database
 
