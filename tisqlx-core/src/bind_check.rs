@@ -7,8 +7,8 @@
 //! are not checked: the macros pick between the two cases with autoref dispatch.
 //!
 //! ```text
-//! use ::tisqlx::__bind_check::{Known as _, Unknown as _};
-//! ::tisqlx::__bind_check::accept::<col::Numeric, _>((&&Probe::new(arg)).class());
+//! use ::tisqlx::bind_check::{Known as _, Unknown as _};
+//! ::tisqlx::bind_check::accept::<col::Numeric, _>((&&Probe::new(arg)).class());
 //! ```
 
 use std::marker::PhantomData;

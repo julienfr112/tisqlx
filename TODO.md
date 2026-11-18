@@ -132,6 +132,9 @@ were fixed by inspection only.
   (`bind_arguments_of_compatible_types`), rejection in `tests/ui-query/bind_types.rs`.
   Unsuffixed numeric literals are classified from the syntax, since their type is still being
   inferred when the check runs.
+- **Unaliased expression names are not parsed as overrides** (`DATE_FORMAT(c, '%H:%i')`), and
+  **a directory named `.env` no longer hangs the build:** unit `query::tests::overrides`,
+  `describe::tests::a_directory_named_dotenv_is_skipped`.
 - **`tisqlx prepare` honours `-p`/`--package` and `--manifest-path`.** `--workspace` and
   `--all-targets` may be passed again, and with `-p`/`--exclude` the other packages' files are
   kept and not reported stale: unit tests in `prepare.rs`. A relative `--manifest-path` works

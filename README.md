@@ -152,8 +152,11 @@ preparing (never running) `SELECT <those columns> FROM <the query's FROM>`.
 
 - **Recognised:** `col = ?` and the other comparisons, `[NOT] LIKE`, `IN (?, …)`,
   `BETWEEN ? AND ?`, `SET col = ?`, `INSERT … (cols) VALUES (?, …)` and `LIMIT`/`OFFSET ?`.
+  A `LIKE` pattern is text whatever the column, so it is checked only against text and binary
+  columns.
 - **Not recognised:** anything else, such as a function argument, a subquery or the select
-  list, keeps only the `Encode` bound.
+  list, keeps only the `Encode` bound. A statement with an executable comment (`/*! … */`)
+  is not analysed at all.
 - **Skipping the check:** `value as _` skips it for one argument; see the workarounds below.
 - **The check is by kind, and strict on purpose.** TiDB accepts almost any bound type and
   converts it at runtime. Measured on 8.5.8:
