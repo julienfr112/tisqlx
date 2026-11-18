@@ -1,12 +1,10 @@
 //! `tisqlx prepare`: generate (or verify) offline query data for the `query!` macros.
 //!
-//! Runs `cargo check --all-targets` with `TISQLX_OFFLINE_DIR` pointing at a
-//! staging directory, so every macro invocation describes its query against
-//! the live database and records it. Crates using the macros are cleaned first,
-//! (in a separate target dir) because cargo would otherwise skip re-running
-//! them on a warm build. The
-//! result replaces `<workspace>/.tisqlx/` (stale files are dropped), or with
-//! `--check` is compared with it.
+//! Runs `cargo check` with `TISQLX_OFFLINE_DIR` pointing at a staging directory, so every
+//! macro invocation describes its query against the live database and records it. The
+//! crates using the macros are cleaned first, because cargo would otherwise not recompile
+//! them on a warm build. The result replaces `<workspace>/.tisqlx/`, or with `--check` is
+//! compared with it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -38,9 +36,49 @@ fn manifest_path(args: &[String]) -> Option<&str> {
     })
 }
 
-/// Whether the user selected packages themselves (then `--workspace` must not be added).
+/// Whether the user's arguments restrict the check to some workspace members.
 fn selects_packages(args: &[String]) -> bool {
-    args.iter().any(|a| a == "-p" || a.starts_with("--package") || (a.starts_with("-p") && a.len() > 2))
+    args.iter().any(|a| {
+        a.starts_with("--package") || a.starts_with("--exclude") || (a.starts_with("-p") && !a.starts_with("--"))
+    })
+}
+
+/// `cargo check` flags added unless the user's arguments already have them (cargo rejects a repeated flag).
+fn default_check_flags(args: &[String]) -> Vec<&'static str> {
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+    let mut flags = Vec::new();
+    if !has("--all-targets") {
+        flags.push("--all-targets");
+    }
+    if !selects_packages(args) && !has("--workspace") && !has("--all") {
+        flags.push("--workspace");
+    }
+    flags
+}
+
+/// Offline data files that differ between the committed directory and a fresh run.
+#[derive(Debug, Default, PartialEq)]
+struct Diff {
+    missing: Vec<String>,
+    changed: Vec<String>,
+    stale: Vec<String>,
+}
+
+/// `partial`: only some packages were checked, so a file they did not produce may belong to
+/// another package and is not stale.
+fn diff(existing: &BTreeMap<String, String>, fresh: &BTreeMap<String, String>, partial: bool) -> Diff {
+    let mut d = Diff::default();
+    for (name, content) in fresh {
+        match existing.get(name) {
+            None => d.missing.push(name.clone()),
+            Some(e) if e != content => d.changed.push(name.clone()),
+            Some(_) => {}
+        }
+    }
+    if !partial {
+        d.stale = existing.keys().filter(|k| !fresh.contains_key(*k)).cloned().collect();
+    }
+    d
 }
 
 fn metadata(args: &[String]) -> anyhow::Result<Workspace> {
@@ -101,21 +139,22 @@ pub async fn run(opts: PrepareOpts) -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging)?;
 
+    // Cargo runs in the user's directory, where a relative `--manifest-path` is valid.
     for pkg in &ws.users {
-        let status = Command::new(cargo())
-            .current_dir(&ws.root)
-            .args(["clean", "-q", "-p", pkg, "--target-dir"])
-            .arg(&prepare_target)
-            .status()?;
+        let mut clean = Command::new(cargo());
+        clean.args(["clean", "-q", "-p", pkg, "--target-dir"]).arg(&prepare_target);
+        if let Some(path) = manifest_path(&opts.args) {
+            clean.args(["--manifest-path", path]);
+        }
+        let status = clean.status().context("running `cargo clean`")?;
         if !status.success() {
             bail!("`cargo clean -p {pkg}` failed");
         }
     }
     let status = Command::new(cargo())
-        .current_dir(&ws.root)
-        .args(["check", "--all-targets", "--target-dir"])
+        .args(["check", "--target-dir"])
         .arg(&prepare_target)
-        .args(if selects_packages(&opts.args) { &[][..] } else { &["--workspace"][..] })
+        .args(default_check_flags(&opts.args))
         .args(&opts.args)
         .env("DATABASE_URL", &url)
         .env("TISQLX_OFFLINE_DIR", &staging)
@@ -136,29 +175,26 @@ pub async fn run(opts: PrepareOpts) -> anyhow::Result<()> {
         bail!("no query was described during `cargo check`; is a compiler cache (RUSTC_WRAPPER) skipping the macros?");
     }
 
+    let diff = diff(&existing, &fresh, selects_packages(&opts.args));
     if opts.check {
-        let stale: Vec<_> = existing.keys().filter(|k| !fresh.contains_key(*k)).collect();
-        let missing: Vec<_> = fresh.keys().filter(|k| !existing.contains_key(*k)).collect();
-        let changed: Vec<_> =
-            fresh.iter().filter(|(k, v)| existing.get(*k).is_some_and(|e| e != *v)).map(|(k, _)| k).collect();
-        if stale.is_empty() && missing.is_empty() && changed.is_empty() {
+        if diff == Diff::default() {
             println!("offline query data in {} is up to date ({} queries)", data_dir.display(), fresh.len());
             return Ok(());
         }
-        for k in &missing {
+        for k in &diff.missing {
             eprintln!("missing: {k}");
         }
-        for k in &changed {
+        for k in &diff.changed {
             eprintln!("changed: {k}");
         }
-        for k in &stale {
+        for k in &diff.stale {
             eprintln!("stale:   {k}");
         }
         bail!("offline query data is out of date; run `tisqlx prepare`");
     }
 
     std::fs::create_dir_all(&data_dir)?;
-    for name in existing.keys().filter(|k| !fresh.contains_key(*k)) {
+    for name in &diff.stale {
         std::fs::remove_file(data_dir.join(name))?;
     }
     for (name, content) in &fresh {
@@ -188,6 +224,29 @@ mod tests {
         assert!(selects_packages(&args(&["-p", "app"])));
         assert!(selects_packages(&args(&["-papp"])));
         assert!(selects_packages(&args(&["--package=app"])));
+        assert!(selects_packages(&args(&["--exclude", "app"])));
         assert!(!selects_packages(&args(&["--all-features", "--profile", "x"])));
+    }
+
+    #[test]
+    fn default_flags_are_not_repeated() {
+        assert_eq!(default_check_flags(&args(&["--all-features"])), ["--all-targets", "--workspace"]);
+        assert!(default_check_flags(&args(&["--workspace", "--all-targets"])).is_empty());
+        assert_eq!(default_check_flags(&args(&["-p", "app"])), ["--all-targets"]);
+    }
+
+    #[test]
+    fn a_partial_run_leaves_other_packages_files() {
+        let map = |v: &[(&str, &str)]| -> BTreeMap<String, String> {
+            v.iter().map(|(k, c)| (k.to_string(), c.to_string())).collect()
+        };
+        let existing = map(&[("a", "1"), ("b", "1"), ("c", "1")]);
+        let fresh = map(&[("a", "1"), ("b", "2"), ("d", "1")]);
+        let full = diff(&existing, &fresh, false);
+        assert_eq!(
+            (&full.missing[..], &full.changed[..], &full.stale[..]),
+            (&["d".to_owned()][..], &["b".to_owned()][..], &["c".to_owned()][..])
+        );
+        assert!(diff(&existing, &fresh, true).stale.is_empty());
     }
 }
