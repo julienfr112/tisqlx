@@ -139,6 +139,9 @@ pub struct TiConnection {
     pub(crate) transaction_depth: usize,
     /// Shallowest transaction level dropped without commit/rollback; rolled back before the next command.
     pub(crate) rollback_to: Option<usize>,
+    /// Whether the open transaction has savepoints. A stale read has none: TiDB accepts
+    /// `SAVEPOINT` there but creates nothing, and there is nothing to roll back.
+    pub(crate) savepoints: bool,
     /// May hold `GET_LOCK` locks taken by tisqlx (the migrator), e.g. after a cancelled run.
     pub(crate) user_locks: bool,
     /// Session `time_zone`, for instant types.
@@ -354,6 +357,7 @@ impl TiConnection {
             pending_close: Vec::new(),
             transaction_depth: 0,
             rollback_to: None,
+            savepoints: true,
             user_locks: false,
             zone: SessionZone::Utc,
         };
@@ -544,6 +548,9 @@ impl TiConnection {
     /// enclosing levels cannot commit work the caller believes is gone.
     pub(crate) async fn rollback_level(&mut self, level: usize) -> Result<()> {
         self.transaction_depth = level - 1;
+        if level > 1 && !self.savepoints {
+            return Ok(());
+        }
         match self.execute_text(&crate::transaction::rollback_sql(level)).await {
             Err(e @ Error::Database(_)) if level > 1 => {
                 self.transaction_depth = 0;

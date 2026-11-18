@@ -37,6 +37,9 @@ impl DerefMut for MaybePoolConnection<'_> {
 
 /// An in-progress transaction (or savepoint, when nested).
 ///
+/// Nesting inside a stale read sends nothing: such a transaction is read-only and TiDB has
+/// no savepoints in it.
+///
 /// Dropping it without calling [`commit`](Self::commit) rolls it back: the
 /// rollback is sent before the connection's next use (or before a pooled
 /// connection is reused).
@@ -72,7 +75,12 @@ impl<'c> Transaction<'c> {
         conn.wait_until_ready().await?;
         let depth = conn.transaction_depth + 1;
         let sql = begin_sql(depth, options)?;
-        if let Err(e) = conn.execute_raw(&sql).await {
+        if depth == 1 {
+            conn.savepoints = !matches!(options, TxnOptions::StaleRead(_));
+        }
+        if (depth == 1 || conn.savepoints)
+            && let Err(e) = conn.execute_raw(&sql).await
+        {
             if matches!(options, TxnOptions::ReadWrite { isolation: Some(_), .. }) {
                 // `SET TRANSACTION ISOLATION LEVEL` may have run without the `BEGIN`: its
                 // one-shot level would apply to the connection's next transaction.
@@ -101,7 +109,9 @@ impl<'c> Transaction<'c> {
             self.open = false;
             return Err(Error::protocol("the transaction was already rolled back; nothing was committed"));
         }
-        self.conn.execute_raw(&commit_sql(self.depth)).await?;
+        if self.depth == 1 || self.conn.savepoints {
+            self.conn.execute_raw(&commit_sql(self.depth)).await?;
+        }
         self.conn.transaction_depth = self.depth - 1;
         self.open = false;
         Ok(())

@@ -134,6 +134,39 @@ async fn begin_options_are_applied() {
     assert!(matches!(nested, Err(Error::Configuration(_))), "{nested:?}");
 }
 
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn nesting_inside_a_stale_read() {
+    // TiDB accepts `SAVEPOINT` in a stale-read transaction but creates nothing, so
+    // `RELEASE SAVEPOINT` and `ROLLBACK TO SAVEPOINT` fail there.
+    require_db!();
+    let opts = fresh_db("txstale").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw("CREATE TABLE t (id INT PRIMARY KEY); INSERT INTO t VALUES (1)").await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+
+    let stale = TxnOptions::stale_read(StaleRead::ExactStaleness(std::time::Duration::from_millis(100)));
+    let mut tx = conn.begin_with(&stale).await.unwrap();
+    let mut nested = tx.begin().await.unwrap();
+    assert_eq!(nested.depth(), 2);
+    assert_eq!(count(&mut nested).await, 1);
+    nested.commit().await.unwrap();
+    drop(tx.begin().await.unwrap()); // abandoned
+    tx.begin().await.unwrap().rollback().await.unwrap();
+    assert_eq!(count(&mut tx).await, 1, "the stale read is still open");
+    assert!(tx.in_transaction());
+    tx.commit().await.unwrap();
+
+    // savepoints are back in the next read-write transaction
+    let mut tx = conn.begin().await.unwrap();
+    {
+        let mut sp = tx.begin().await.unwrap();
+        query("INSERT INTO t VALUES (2)").execute(&mut *sp).await.unwrap();
+    }
+    tx.commit().await.unwrap();
+    assert_eq!(count(&mut conn).await, 1);
+}
+
 /// Written once, callable with a pool, a connection, a pooled connection or a transaction.
 async fn add_user<'c>(db: impl Acquire<'c>, name: &str) -> Result<()> {
     let mut tx = db.begin().await?;
