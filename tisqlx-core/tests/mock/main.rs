@@ -545,3 +545,26 @@ async fn non_network_errors_do_not_fail_over() {
     assert!(tried.is_err(), "the second host must not be contacted");
     denied.finish().await;
 }
+
+#[tokio::test]
+async fn connection_lost_during_the_tls_handshake_fails_over() {
+    // A server that dies right after the TLS request is a network error like any other.
+    let dying = Mock::start(|mut c: Conn| async move {
+        c.handshake("mysql_native_password", DEFAULT_CAPS | SSL).await;
+        c.recv().await.expect("SSL request");
+    })
+    .await;
+    let live = Mock::start(serve_until_closed).await;
+    let opts = options(vec![addr_of(&dying.url), addr_of(&live.url)]).ssl_mode(SslMode::Preferred);
+    let conn = opts.connect().await.unwrap();
+    assert_eq!(conn.server_addr().unwrap().port(), addr_of(&live.url).1);
+    conn.close().await.unwrap();
+    dying.finish().await;
+    live.finish().await;
+}
+
+#[tokio::test]
+async fn no_hosts_is_a_configuration_error() {
+    let err = ConnectOptions::new().hosts(Vec::<(String, u16)>::new()).connect().await.unwrap_err();
+    assert!(matches!(err, Error::Configuration(_)), "{err}");
+}

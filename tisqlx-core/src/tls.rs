@@ -28,7 +28,11 @@ pub(crate) async fn upgrade(stream: &mut PacketStream, options: &ConnectOptions,
         .map_err(|e| Error::Tls(format!("invalid TLS server name: {e}").into()))?;
     let connector = tokio_rustls::TlsConnector::from(config);
     let socket = stream.take_socket();
-    let tls = connector.connect(server_name, socket).await.map_err(|e| Error::Tls(e.into()))?;
+    // A TLS failure (bad certificate, alert...) wraps a `rustls::Error`; anything else is the
+    // network failing mid-handshake, which must stay an I/O error so that connecting fails over.
+    let tls = connector.connect(server_name, socket).await.map_err(|e| {
+        if e.get_ref().is_some_and(|inner| inner.is::<rustls::Error>()) { Error::Tls(e.into()) } else { Error::Io(e) }
+    })?;
     stream.replace_socket(Socket::Tls(Box::new(tls)));
     stream.is_tls = true;
     Ok(())

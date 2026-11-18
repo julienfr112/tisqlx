@@ -39,9 +39,7 @@ impl QueryResult {
     pub fn last_insert_id(&self) -> u64 {
         self.last_insert_id
     }
-}
 
-impl QueryResult {
     /// Combine the results of consecutive statements.
     pub(crate) fn add(&mut self, r: QueryResult) {
         self.rows_affected += r.rows_affected;
@@ -77,9 +75,7 @@ enum Phase {
     Idle,
     /// Expecting the first packet of a (possibly additional) result.
     Response,
-    Columns {
-        remaining: usize,
-    },
+    /// Expecting the EOF that follows the column definitions (servers without DEPRECATE_EOF).
     ColumnsEof,
     Rows,
     /// A cancelled operation left the stream mid-packet or mid-handshake.
@@ -189,8 +185,11 @@ impl TiConnection {
         targets: &[Target],
         mut report: impl FnMut(usize, bool),
     ) -> Result<(Self, usize)> {
+        if targets.is_empty() {
+            return Err(Error::config("no host to connect to"));
+        }
         let deadline = tokio::time::Instant::now() + options.connect_timeout;
-        let share = options.connect_timeout / targets.len().max(1) as u32;
+        let share = options.connect_timeout / targets.len() as u32;
         let mut last = None;
         for (i, target) in targets.iter().enumerate() {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -628,18 +627,6 @@ impl TiConnection {
         self.phase = if status & status::MORE_RESULTS_EXISTS != 0 { Phase::Response } else { Phase::Idle };
     }
 
-    /// Read the next column definition packet, or `None` after the last one.
-    async fn next_column_packet(&mut self) -> Result<Option<Vec<u8>>> {
-        let Phase::Columns { remaining } = self.phase else { return Ok(None) };
-        if remaining == 0 {
-            self.phase = if self.deprecate_eof() { Phase::Rows } else { Phase::ColumnsEof };
-            return Ok(None);
-        }
-        let p = self.recv().await?;
-        self.phase = Phase::Columns { remaining: remaining - 1 };
-        Ok(Some(p))
-    }
-
     /// Read the next message of the current response. A database error ends the
     /// response cleanly; any other error (I/O, malformed packet) leaves the stream
     /// position unknown, so the connection is marked broken.
@@ -657,7 +644,7 @@ impl TiConnection {
         loop {
             match self.phase {
                 Phase::Idle => return Err(Error::protocol("no response pending")),
-                Phase::Broken => return Err(Error::protocol("connection is broken")),
+                Phase::Broken => return Err(broken()),
                 Phase::Response => {
                     let packet = self.recv().await?;
                     match packet.first() {
@@ -676,18 +663,14 @@ impl TiConnection {
                             if n > MAX_COLUMNS {
                                 return Err(Error::protocol(format!("invalid column count {n}")));
                             }
-                            self.phase = Phase::Columns { remaining: n };
                             let mut defs = Vec::with_capacity(n);
-                            while let Some(p) = self.next_column_packet().await? {
-                                defs.push(ColumnDefinition::decode(&p)?);
+                            for _ in 0..n {
+                                defs.push(ColumnDefinition::decode(&self.recv().await?)?);
                             }
+                            self.phase = if self.deprecate_eof() { Phase::Rows } else { Phase::ColumnsEof };
                             return Ok(Msg::Columns(defs));
                         }
                     }
-                }
-                Phase::Columns { .. } => {
-                    // Only reachable when draining after a cancelled read.
-                    while self.next_column_packet().await?.is_some() {}
                 }
                 Phase::ColumnsEof => {
                     let p = self.recv().await?;

@@ -16,6 +16,7 @@ pub const PLUGIN_AUTH: u32 = 1 << 19;
 pub const PLUGIN_AUTH_LENENC: u32 = 1 << 21;
 pub const DEPRECATE_EOF: u32 = 1 << 24;
 pub const CONNECT_WITH_DB: u32 = 1 << 3;
+pub const SSL: u32 = 1 << 11;
 
 pub const DEFAULT_CAPS: u32 = CLIENT_PROTOCOL_41
     | SECURE_CONNECTION

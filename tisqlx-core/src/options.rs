@@ -195,9 +195,8 @@ impl ConnectOptions {
         self
     }
 
-    /// Session `time_zone` (default `+00:00`; `None` keeps the server default).
-    ///
-    /// `DateTime<Utc>` values are only correct with a UTC session zone.
+    /// Session `time_zone` (default `+00:00`; `None` keeps the server default). Instant types
+    /// (`DateTime<Utc>`, `OffsetDateTime`, ...) are converted to and from it on the client.
     pub fn timezone(mut self, tz: Option<&str>) -> Self {
         self.timezone = tz.map(str::to_owned);
         self
@@ -243,14 +242,14 @@ impl ConnectOptions {
         self.database.as_deref()
     }
 
-    /// The first host.
+    /// The first host (`localhost` if the list is empty).
     pub fn get_host(&self) -> &str {
-        &self.hosts[0].0
+        self.hosts.first().map_or("localhost", |(h, _)| h)
     }
 
     /// The first host's port.
     pub fn get_port(&self) -> u16 {
-        self.hosts[0].1.unwrap_or(self.port)
+        self.hosts.first().and_then(|(_, p)| *p).unwrap_or(self.port)
     }
 
     /// Every host, with its port.
@@ -305,19 +304,22 @@ impl FromStr for ConnectOptions {
         if !path.is_empty() {
             opts.database = Some(decode(path));
         }
-        for (k, v) in url.query_pairs() {
+        // Not `query_pairs()`: it reads `+` as a space, which would break `timezone=+08:00`.
+        for pair in url.query().unwrap_or_default().split('&').filter(|p| !p.is_empty()) {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let (k, v) = (decode(k), decode(v));
             match &*k {
                 "ssl-mode" => opts.ssl_mode = v.parse()?,
-                "ssl-ca" => opts.ssl_ca = Some(PathBuf::from(&*v)),
+                "ssl-ca" => opts.ssl_ca = Some(PathBuf::from(v)),
                 "statement-cache-capacity" => {
                     opts.statement_cache_capacity =
                         v.parse().map_err(|_| Error::config("invalid statement-cache-capacity"))?
                 }
-                "timezone" => opts.timezone = if v.is_empty() || v == "server" { None } else { Some(v.into_owned()) },
+                "timezone" => opts.timezone = if v.is_empty() || v == "server" { None } else { Some(v) },
                 "require-tidb" => opts.require_tidb = v.parse().map_err(|_| Error::config("invalid require-tidb"))?,
                 "txn-mode" => opts.txn_mode = Some(v.parse()?),
-                "resource-group" => opts.resource_group = Some(v.into_owned()),
-                "socket" => opts.socket = Some(PathBuf::from(&*v)),
+                "resource-group" => opts.resource_group = Some(v),
+                "socket" => opts.socket = Some(PathBuf::from(v)),
                 "load-balance-dns" => {
                     opts.load_balance_dns = v.parse().map_err(|_| Error::config("invalid load-balance-dns"))?
                 }
@@ -325,10 +327,8 @@ impl FromStr for ConnectOptions {
                     let secs: u64 = v.parse().map_err(|_| Error::config("invalid connect-timeout (seconds)"))?;
                     opts.connect_timeout = Duration::from_secs(secs);
                 }
-                other => {
-                    // Any other key is a session variable: ?tidb_isolation_read_engines=tiflash
-                    opts.session_vars.push((other.to_owned(), v.into_owned()));
-                }
+                // Any other key is a session variable: ?tidb_isolation_read_engines=tiflash
+                _ => opts.session_vars.push((k, v)),
             }
         }
         Ok(opts)
@@ -398,6 +398,15 @@ mod tests {
     }
 
     #[test]
+    fn query_values_are_percent_decoded_only() {
+        // `+` is a plus sign, not a form-encoded space: `timezone=+08:00` must work as written.
+        let o: ConnectOptions = "tidb://h/db?timezone=+08:00&ssl-ca=/etc/a+b.pem&x=a%20b%2Bc&".parse().unwrap();
+        assert_eq!(o.timezone.as_deref(), Some("+08:00"));
+        assert_eq!(o.ssl_ca.as_deref(), Some(std::path::Path::new("/etc/a+b.pem")));
+        assert_eq!(o.session_vars, vec![("x".into(), "a b+c".into())]);
+    }
+
+    #[test]
     fn default_port() {
         let o: ConnectOptions = "mysql://root@localhost".parse().unwrap();
         assert_eq!(o.get_hosts(), [("localhost", 4000)]);
@@ -425,6 +434,9 @@ mod tests {
         assert_eq!(o.get_hosts(), [("a", 4001)]);
         let o = ConnectOptions::new().hosts([("a", 1), ("b", 2)]).port(4001);
         assert_eq!(o.get_hosts(), [("a", 1), ("b", 2)]);
+        // an empty list is refused at connect time; the getters must not panic on it
+        let o = ConnectOptions::new().hosts(Vec::<(String, u16)>::new());
+        assert_eq!((o.get_host(), o.get_port()), ("localhost", 4000));
         // a one-host URL's port survives `host()`, and `port()` still changes it
         let o: ConnectOptions = "tidb://root@127.0.0.1:4100/db".parse().unwrap();
         assert_eq!(o.clone().host("localhost").get_hosts(), [("localhost", 4100)]);
