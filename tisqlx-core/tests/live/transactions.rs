@@ -133,3 +133,38 @@ async fn begin_options_are_applied() {
     let nested = tx.begin_with(&TxnOptions::optimistic()).await.map(drop);
     assert!(matches!(nested, Err(Error::Configuration(_))), "{nested:?}");
 }
+
+/// Written once, callable with a pool, a connection, a pooled connection or a transaction.
+async fn add_user<'c>(db: impl Acquire<'c>, name: &str) -> Result<()> {
+    let mut tx = db.begin().await?;
+    query("INSERT INTO t (name) VALUES (?)").bind(name).execute(&mut *tx).await?;
+    tx.commit().await
+}
+
+async fn count_users<'c>(db: impl Acquire<'c>) -> i64 {
+    let mut conn = db.acquire().await.unwrap();
+    query_scalar("SELECT COUNT(*) FROM t").fetch_one(&mut *conn).await.unwrap()
+}
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn acquire_accepts_pools_connections_and_transactions() {
+    require_db!();
+    let opts = fresh_db("acquire").await;
+    let pool = PoolOptions::new().max_connections(2).connect_with(opts.clone()).await.unwrap();
+    raw_sql("CREATE TABLE t (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(20))").execute(&pool).await.unwrap();
+    add_user(&pool, "pool").await.unwrap();
+    let mut conn = opts.connect().await.unwrap();
+    add_user(&mut conn, "connection").await.unwrap();
+    let mut pooled = pool.acquire().await.unwrap();
+    add_user(&mut pooled, "pooled").await.unwrap();
+    assert_eq!(count_users(&mut pooled).await, 3);
+    drop(pooled);
+    // Inside a transaction, `begin` is a savepoint: the outer rollback undoes the inner commit.
+    let mut tx = pool.begin().await.unwrap();
+    add_user(&mut tx, "rolled back").await.unwrap();
+    assert_eq!(count_users(&mut tx).await, 4);
+    tx.rollback().await.unwrap();
+    assert_eq!(count_users(&pool).await, 3);
+    assert_eq!(count_users(&mut conn).await, 3);
+}

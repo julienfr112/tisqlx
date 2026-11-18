@@ -3,6 +3,7 @@
 //!
 //! Most users should depend on the `tisqlx` facade crate instead.
 
+pub mod acquire;
 pub mod arguments;
 #[doc(hidden)]
 pub mod bind_check;
@@ -28,6 +29,7 @@ pub mod types;
 mod tz;
 pub mod util;
 
+pub use acquire::Acquire;
 pub use arguments::Arguments;
 pub use connection::{Describe, QueryResult, Step, TiConnection};
 pub use decode::Decode;

@@ -61,8 +61,6 @@ it is tested.
   - Network address types for `INET6_ATON` values.
   - The macros can't infer `types::Vector`, because TiDB sends VECTOR columns as text; it needs
     an override.
-- [ ] **P3: An `Acquire`-style trait.** Lets functions accept a pool, a connection or a
-  transaction uniformly.
 - [ ] **P3: Protocol features.** Compression, `LOAD DATA LOCAL INFILE`,
   `COM_STMT_SEND_LONG_DATA` and cursor fetch are not supported.
 
@@ -182,6 +180,8 @@ found.
   `record_deleted_by_the_migration_fails_the_run`.
 
 **Features**
+- **`Acquire`:** one function for a pool, a connection, a pooled connection or a transaction;
+  `begin()` nests as a savepoint. Test: live `acquire_accepts_pools_connections_and_transactions`.
 - **Fixtures for `#[tisqlx::test]`:** `fixtures("a.sql", ...)` runs SQL files after the
   migrations, in order. Tests: `tisqlx/tests/test_attr.rs` (`applies_fixtures_in_order`) and the
   compile errors in `tests/ui/test_attr_errors.rs`.

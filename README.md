@@ -14,6 +14,8 @@ nothing else.
   repaired.
 - A connection pool, nested transactions via savepoints, and a prepared-statement cache that
   survives DDL (also DDL run on another TiDB node).
+- `Acquire`: write a function once and call it with `&pool`, `&mut conn` or `&mut tx`. Its
+  `begin()` is a transaction, or a savepoint inside a transaction.
 - `#[tisqlx::test]`: async tests that each get a throwaway database, with migrations and fixtures
   applied.
 - Exposes TiDB primitives: `Tso`, `TiDbVersion` feature detection, `AUTO_RANDOM` ids through
