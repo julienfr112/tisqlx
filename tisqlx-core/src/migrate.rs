@@ -452,12 +452,14 @@ impl Migrator {
         let ran = conn.execute_raw(&m.sql).await;
         // After a `USE other`, later migrations and the caller still expect the original database.
         let restored = conn.execute_raw(&format!("USE {db}")).await;
+        // The bookkeeping that follows (now, or a later `repair` on this connection) would join
+        // an open transaction and commit it: roll it back, leaving the migration dirty.
+        let left_open = conn.in_transaction();
+        let rolled_back = if left_open { conn.execute_raw("ROLLBACK").await.map(drop) } else { Ok(()) };
         ran.map_err(|e| MigrateError::ExecuteMigration(m.version, e))?;
         restored?;
-        // The bookkeeping that follows would join an open transaction (and be rolled back
-        // with it): roll it back and fail, leaving the migration dirty.
-        if conn.in_transaction() {
-            conn.execute_raw("ROLLBACK").await?;
+        rolled_back?;
+        if left_open {
             return Err(MigrateError::ExecuteMigration(
                 m.version,
                 Error::config("the migration left a transaction open (missing COMMIT); it was rolled back"),

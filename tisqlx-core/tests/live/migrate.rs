@@ -242,3 +242,22 @@ async fn lock_held_by_another_runner_times_out() {
     // the lock was released: the same connection gets it now
     quick.run_on(&mut c2).await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn failed_migration_does_not_leave_its_transaction_open() {
+    // Left open on a borrowed connection, the next bookkeeping write (a `repair`) would
+    // commit the half-done migration.
+    require_db!();
+    let opts = fresh_db("mig9").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw("CREATE TABLE t (id INT PRIMARY KEY)").await.unwrap();
+    let d = dir("mig9", &[("1_half.sql", "BEGIN; INSERT INTO t VALUES (1); INSERT INTO missing VALUES (1); COMMIT;")]);
+    let m = Migrator::new(&d).unwrap();
+    let err = m.run_on(&mut conn).await.unwrap_err();
+    assert!(matches!(&err, MigrateError::ExecuteMigration(1, Error::Database(e)) if e.code == 1146), "{err}");
+    assert!(!conn.in_transaction());
+    m.repair(&mut conn, 1, false).await.unwrap();
+    let n: i64 = query_scalar("SELECT COUNT(*) FROM t").fetch_one(&mut conn).await.unwrap();
+    assert_eq!(n, 0, "the half-done migration was rolled back, not committed by `repair`");
+}
