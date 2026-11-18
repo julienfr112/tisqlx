@@ -40,24 +40,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: make test-unit
 
-  # Live tests against a dedicated TiDB (same version as local `make db-up`).
+  # Live tests against a dedicated TiDB, the minimum supported version (same as local `make db-up`).
   live:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        tidb: [v8.5.8, v7.5.6]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Start TiDB
-        run: TIDB_RUNNER=docker TIDB_VERSION=${{ matrix.tidb }} scripts/tidb.sh up
+        run: TIDB_RUNNER=docker TIDB_VERSION=v8.5.8 scripts/tidb.sh up
       - name: Live tests
         # No Unix socket with the docker runner: socket auth is reported as not tested.
         run: make test-live TEST_SOCKET=
       - name: Offline query data is up to date
-        if: matrix.tidb == 'v8.5.8'
         run: make prepare-check
 
   # Real cluster (PD, TiKV, TiFlash, 2 TiDB nodes) via tiup playground: slow, nightly only.

@@ -187,8 +187,12 @@ impl TiConnection {
             handshake.auth_plugin
         );
         let tidb_version = TiDbVersion::parse(&handshake.server_version);
-        if tidb_version.is_none() && options.require_tidb {
-            return Err(Error::NotTiDb(handshake.server_version));
+        if options.require_tidb {
+            match tidb_version {
+                None => return Err(Error::NotTiDb(handshake.server_version)),
+                Some(v) if v < TiDbVersion::MINIMUM => return Err(Error::UnsupportedTiDb(v)),
+                Some(_) => {}
+            }
         }
 
         let mut capabilities = caps::LONG_PASSWORD

@@ -144,8 +144,13 @@ impl Conn {
     }
 
     pub async fn handshake(&mut self, plugin: &str, caps: u32) {
+        self.handshake_as("8.0.11-TiDB-v8.5.8", plugin, caps).await;
+    }
+
+    pub async fn handshake_as(&mut self, version: &str, plugin: &str, caps: u32) {
         let mut p = vec![10u8];
-        p.extend_from_slice(b"8.0.11-TiDB-v8.5.8\0");
+        p.extend_from_slice(version.as_bytes());
+        p.push(0);
         p.extend_from_slice(&7u32.to_le_bytes());
         p.extend_from_slice(b"abcdefgh\0");
         p.extend_from_slice(&(caps as u16).to_le_bytes());

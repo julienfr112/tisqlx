@@ -74,8 +74,7 @@ async fn instants_round_trip_in_a_non_utc_session() {
         let n: i64 = query_scalar("SELECT COUNT(*) FROM t WHERE ts = ?").bind(odt).fetch_one(&mut conn).await.unwrap();
         assert_eq!(n, 1);
     }
-    let echoed: DateTime<Utc> =
-        query_scalar("SELECT CAST(? AS DATETIME(6))").bind(cases[0].1).fetch_one(&mut conn).await.unwrap();
+    let echoed: DateTime<Utc> = query_scalar("SELECT ?").bind(cases[0].1).fetch_one(&mut conn).await.unwrap();
     assert_eq!(echoed, cases[0].1);
     assert_now_is_correct(&mut conn).await;
 }
@@ -96,11 +95,7 @@ async fn daylight_saving_wall_times_decode_to_the_instant_tidb_stores() {
                     .unwrap()
                     .and_hms_opt(minutes / 60, minutes % 60, 0)
                     .unwrap();
-                // TiDB 7.5 rejects a TIMESTAMP wall time inside the gap (8.5 clamps it).
-                if let Err(e) = query("INSERT INTO t VALUES (?, ?)").bind(wall).bind(wall).execute(&mut conn).await {
-                    assert!(matches!(&e, Error::Database(d) if d.code == 1292), "{e}");
-                    query("INSERT INTO t VALUES (?, NULL)").bind(wall).execute(&mut conn).await.unwrap();
-                }
+                query("INSERT INTO t VALUES (?, ?)").bind(wall).bind(wall).execute(&mut conn).await.unwrap();
             }
         }
         let rows = query("SELECT dt, ts, UNIX_TIMESTAMP(dt) AS dt_epoch, UNIX_TIMESTAMP(ts) AS ts_epoch FROM t")
@@ -115,9 +110,11 @@ async fn daylight_saving_wall_times_decode_to_the_instant_tidb_stores() {
                 r.get::<i64, _>("dt_epoch"),
                 "{zone} DATETIME {dt}"
             );
-            if let Some(ts) = r.get::<Option<DateTime<Utc>>, _>("ts") {
-                assert_eq!(ts.timestamp(), r.get::<i64, _>("ts_epoch"), "{zone} TIMESTAMP from {dt}");
-            }
+            assert_eq!(
+                r.get::<DateTime<Utc>, _>("ts").timestamp(),
+                r.get::<i64, _>("ts_epoch"),
+                "{zone} TIMESTAMP from {dt}"
+            );
         }
     }
 }

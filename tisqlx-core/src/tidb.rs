@@ -154,6 +154,9 @@ pub struct TiDbVersion {
 }
 
 impl TiDbVersion {
+    /// The oldest TiDB tisqlx supports (and is tested against): the 8.5 LTS.
+    pub const MINIMUM: Self = Self::new(8, 5, 0);
+
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
         Self { major, minor, patch }
     }

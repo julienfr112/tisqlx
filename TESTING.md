@@ -74,7 +74,7 @@ After changing a `query!` call or the test schema (`tisqlx/tests/migrations`), r
 | `lint` | always | `make lint features` |
 | `msrv` | always | `cargo check --all-targets --all-features` on Rust 1.88 |
 | `unit` | always | `make test-unit` (no database) |
-| `live` | always, for TiDB v8.5.8 and v7.5.6 | the dedicated TiDB in docker, then `make test-live TEST_SOCKET=` (no socket, so socket auth reports itself untested); v8.5.8 also runs `make prepare-check` |
+| `live` | always | TiDB v8.5.8 (the minimum supported version) in docker, then `make test-live TEST_SOCKET=` (no socket, so socket auth reports itself untested) and `make prepare-check` |
 | `cluster` | nightly and on demand | installs tiup, then `make db-cluster test-cluster` |
 | `audit` | always | `rustsec/audit-check` |
 
@@ -84,8 +84,7 @@ until it gets one. What has been checked locally, and what hasn't:
 | Piece | Checked locally? |
 |---|---|
 | `make lint features`, `make test-unit`, MSRV 1.88 | yes, same commands |
-| `live` with v7.5.6 | yes, same docker image and command |
-| `live` with v8.5.8 | only with the tiup `tidb-server` binary, not the `pingcap/tidb:v8.5.8` image |
+| `live` | only with the tiup `tidb-server` binary, not the `pingcap/tidb:v8.5.8` image |
 | `cluster` tier | yes with a local tiup; the job's tiup install step is untested |
 | `audit` action, `Swatinem/rust-cache`, the GitHub runner environment | no |
 

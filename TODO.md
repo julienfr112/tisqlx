@@ -142,7 +142,7 @@ checked to fail when the fix is reverted.
 - Tests:
   - unit `tz::tests`;
   - live `timezone::*`: round trips through DATETIME and TIMESTAMP in Europe/Paris, and
-    DST parity with `UNIX_TIMESTAMP` in Paris and New York, on 8.5.8 and 7.5.6. Both were
+    DST parity with `UNIX_TIMESTAMP` in Paris and New York. Both were
     checked to fail when the conversion is removed.
 
 **Pool pings only after `ping_after_idle`** (default 30 s; `Duration::ZERO` pings every time).
@@ -183,6 +183,10 @@ deterministic stand-in for `cargo fuzz`, which needs nightly. `TISQLX_FUZZ_ITERS
 longer; 1M iterations are clean. It found and fixed:
 - a TIME with a huge hour count overflowed: a panic in debug builds, a wrong value in release;
 - a binary DATETIME with microseconds ≥ 10⁶ overflowed the time-zone conversion.
+
+**TiDB 8.5 is the minimum.** Older TiDB is refused at connect time
+(`Error::UnsupportedTiDb`, opt out with `require-tidb=false`), and CI tests 8.5.8 only. The
+7.5-specific test workarounds were removed. Test: mock `tidb_older_than_the_minimum_is_rejected`.
 
 **Features**
 - **`Acquire`:** one function for a pool, a connection, a pooled connection or a transaction;

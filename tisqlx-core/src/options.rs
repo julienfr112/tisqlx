@@ -172,7 +172,8 @@ impl ConnectOptions {
         self
     }
 
-    /// Fail to connect when the server is not TiDB (default `true`).
+    /// Fail to connect when the server is not TiDB, or is older than
+    /// [`TiDbVersion::MINIMUM`](crate::TiDbVersion::MINIMUM) (8.5) (default `true`).
     pub fn require_tidb(mut self, require: bool) -> Self {
         self.require_tidb = require;
         self

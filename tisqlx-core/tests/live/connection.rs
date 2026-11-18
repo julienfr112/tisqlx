@@ -8,7 +8,7 @@ use crate::common::*;
 async fn select_one_text_and_binary() {
     require_db!();
     let mut conn = TiConnection::connect(&base_url()).await.unwrap();
-    assert!(conn.tidb_version().unwrap().at_least(6, 0));
+    assert!(conn.tidb_version().unwrap() >= TiDbVersion::MINIMUM);
 
     let rows = raw_sql("SELECT 1, 'a', NULL").fetch_all(&mut conn).await.unwrap();
     assert_eq!(rows.len(), 1);

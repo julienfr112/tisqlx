@@ -26,16 +26,6 @@ macro_rules! require_db {
 }
 pub(crate) use require_db;
 
-/// Whether the server is at least `major.minor`; prints why a test is skipped otherwise.
-pub fn tidb_at_least(conn: &TiConnection, major: u32, minor: u32, feature: &str) -> bool {
-    let v = conn.tidb_version().expect("TiDB");
-    let ok = v.at_least(major, minor);
-    if !ok {
-        eprintln!("skipped: {feature} needs TiDB {major}.{minor}+, server is {v:?}");
-    }
-    ok
-}
-
 /// The two TiDB nodes of the cluster tier (`TISQLX_TEST_CLUSTER=url1,url2`, set by
 /// `make test-cluster`), or `None` (test skipped). `TISQLX_TEST_REQUIRE_CLUSTER=1` makes
 /// a missing cluster a failure.

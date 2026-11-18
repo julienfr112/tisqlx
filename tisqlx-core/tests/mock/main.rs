@@ -230,6 +230,30 @@ async fn non_tidb_server_is_rejected() {
 }
 
 #[tokio::test]
+async fn tidb_older_than_the_minimum_is_rejected() {
+    let old = Mock::start(|mut c: Conn| async move {
+        c.handshake_as("8.0.11-TiDB-v8.4.0", "mysql_native_password", DEFAULT_CAPS).await;
+    })
+    .await;
+    let err = TiConnection::connect(&old.url).await.unwrap_err();
+    assert!(matches!(err, Error::UnsupportedTiDb(v) if v == TiDbVersion::new(8, 4, 0)), "{err}");
+    assert!(err.to_string().contains("needs TiDB v8.5.0 or newer"), "{err}");
+    old.finish().await;
+
+    // `require_tidb(false)` connects anyway.
+    let older = Mock::start(|mut c: Conn| async move {
+        c.handshake_as("8.0.11-TiDB-v7.5.6", "mysql_native_password", DEFAULT_CAPS).await;
+        c.recv().await.expect("handshake response");
+        c.ok(0, 0, AUTOCOMMIT).await;
+        c.recv().await.expect("session SET");
+        c.ok(0, 0, AUTOCOMMIT).await;
+    })
+    .await;
+    older.url.parse::<ConnectOptions>().unwrap().require_tidb(false).connect().await.unwrap();
+    older.finish().await;
+}
+
+#[tokio::test]
 async fn pool_resets_connection_returned_mid_result() {
     // `SELECT ...; BEGIN` dropped after one row: the unread BEGIN would leak an open
     // transaction to the next borrower unless the pool drains and rolls back.

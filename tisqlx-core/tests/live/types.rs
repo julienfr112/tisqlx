@@ -128,9 +128,6 @@ async fn vector_columns() {
     require_db!();
     let opts = fresh_db("vector").await;
     let mut conn = opts.connect().await.unwrap();
-    if !tidb_at_least(&conn, 8, 4, "VECTOR") {
-        return;
-    }
     conn.execute_raw("CREATE TABLE v (id INT PRIMARY KEY, e VECTOR(3)); INSERT INTO v VALUES (1, '[1,2.5,3]')")
         .await
         .unwrap();
@@ -285,9 +282,6 @@ async fn vector_type() {
     require_db!();
     let opts = fresh_db("vectortype").await;
     let mut conn = opts.connect().await.unwrap();
-    if !tidb_at_least(&conn, 8, 4, "VECTOR") {
-        return;
-    }
     conn.execute_raw("CREATE TABLE v (id INT PRIMARY KEY, e VECTOR(3))").await.unwrap();
     let a = Vector(vec![1.0, 2.5, -3.0]);
     query("INSERT INTO v VALUES (1, ?)").bind(&a).execute(&mut conn).await.unwrap();
@@ -398,7 +392,7 @@ async fn null_of_every_type_into_every_column() {
         bigdecimal::BigDecimal,
         serde_json::Value,
         Json<Vec<i32>>,
-        types::Set,
+        Set,
         Vector,
         uuid::Uuid,
         uuid::fmt::Hyphenated,

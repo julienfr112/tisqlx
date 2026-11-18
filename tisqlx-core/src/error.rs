@@ -54,6 +54,12 @@ pub enum Error {
     #[error("connected server is not TiDB (version string: {0:?}); set `require_tidb(false)` to allow it")]
     NotTiDb(String),
 
+    #[error(
+        "TiDB {0} is not supported: tisqlx needs TiDB {min} or newer; set `require_tidb(false)` to connect anyway",
+        min = crate::tidb::TiDbVersion::MINIMUM
+    )]
+    UnsupportedTiDb(crate::tidb::TiDbVersion),
+
     #[error(transparent)]
     Migrate(#[from] Box<crate::migrate::MigrateError>),
 }
