@@ -873,7 +873,7 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
         let conn = &mut *self.conn;
         // A prepared statement keeps reading the database that was current when it was
         // prepared: after a `USE`, a cached one would silently query the old database.
-        if !conn.cache.map.is_empty() && mentions_use(&self.sql) {
+        if !conn.cache.map.is_empty() && changes_database(&self.sql) {
             conn.forget_statements();
         }
         conn.wait_until_ready().await?;
@@ -958,14 +958,20 @@ impl<C: DerefMut<Target = TiConnection>> Run<'_, C> {
     }
 }
 
-/// Whether `sql` contains the word `USE`, so may change the current database. A false positive
-/// (a column named `use`, a string) only costs preparing the cached statements again.
-fn mentions_use(sql: &str) -> bool {
-    let b = sql.as_bytes();
-    let is_word = |c: Option<&u8>| c.is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_' || !c.is_ascii());
-    b.windows(3)
-        .enumerate()
-        .any(|(i, w)| w.eq_ignore_ascii_case(b"use") && !(i > 0 && is_word(b.get(i - 1))) && !is_word(b.get(i + 3)))
+/// Whether a statement of `sql` starts with `USE`, so changes the current database. An index
+/// hint (`FROM t USE INDEX (i)`) doesn't count, or it would empty the cache on every run. A
+/// false positive (a `;` inside a string) only costs preparing the cached statements again.
+fn changes_database(sql: &str) -> bool {
+    sql.split(';').any(|statement| {
+        let mut rest = statement.trim_start();
+        while let Some(comment) = rest.strip_prefix("/*") {
+            rest = comment.split_once("*/").map_or("", |(_, after)| after.trim_start());
+        }
+        let b = rest.as_bytes();
+        b.len() >= 3
+            && b[..3].eq_ignore_ascii_case(b"use")
+            && !b.get(3).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+    })
 }
 
 /// One server to connect to: a host name and port, or one of its resolved addresses.
@@ -1016,15 +1022,23 @@ fn broken() -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::mentions_use;
+    use super::changes_database;
 
     #[test]
     fn use_statements_are_spotted() {
-        for sql in ["USE db", "use`db`", "SELECT 1;\nUse db", "/* x */use db", "SELECT 1; USE"] {
-            assert!(mentions_use(sql), "{sql}");
+        for sql in ["USE db", " use`db`", "SELECT 1;\nUse db", "/* x */ /* y */use db", "SELECT 1; USE"] {
+            assert!(changes_database(sql), "{sql}");
         }
-        for sql in ["", "us", "SELECT used, user, reuse, _use, use_, caf\u{e9}use FROM t", "SELECT 1 FROM house"] {
-            assert!(!mentions_use(sql), "{sql}");
+        for sql in [
+            "",
+            "us",
+            "user",
+            "use_",
+            "SELECT 1 FROM t USE INDEX (i) WHERE a = ?",
+            "SELECT used, `use` FROM house",
+            "/* use db */ SELECT 1",
+        ] {
+            assert!(!changes_database(sql), "{sql}");
         }
     }
 }
