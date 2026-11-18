@@ -52,6 +52,8 @@ impl Balancer {
 
     fn plan_at(&self, targets: Vec<Target>, now: Instant) -> Vec<Target> {
         let mut state = self.state.lock().unwrap();
+        // Forget servers that are gone (DNS answers change), once their connections are closed.
+        state.servers.retain(|s| s.live.load(Ordering::Acquire) > 0 || targets.contains(&s.target));
         let rotation = state.rotation;
         state.rotation = state.rotation.wrapping_add(1);
         let n = targets.len().max(1);
@@ -143,6 +145,21 @@ mod tests {
         assert!(first.iter().all(|h| h != "b"), "{first:?}");
         drop(_b);
         assert_eq!(b.counts().iter().map(|(_, n)| *n).sum::<u32>(), 2, "slots uncount on drop");
+    }
+
+    #[test]
+    fn servers_no_longer_listed_are_forgotten_once_empty() {
+        let b = Balancer::default();
+        let names = |b: &Balancer| b.counts().into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+        b.plan(vec![t("a"), t("b")]);
+        let on_a = b.slot(&t("a"));
+        b.report(&t("b"), false);
+        // the list changes: `b` goes at once, `a` stays while it has a connection
+        b.plan(vec![t("c")]);
+        assert_eq!(names(&b), ["a:4000", "c:4000"]);
+        drop(on_a);
+        b.plan(vec![t("c")]);
+        assert_eq!(names(&b), ["c:4000"]);
     }
 
     #[test]
