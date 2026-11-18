@@ -13,16 +13,6 @@ use crate::tz::SessionZone;
 
 pub use crate::protocol::ColumnDefinition as Column;
 
-impl Column {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn type_info(&self) -> &TypeInfo {
-        &self.type_info
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowFormat {
     Text,

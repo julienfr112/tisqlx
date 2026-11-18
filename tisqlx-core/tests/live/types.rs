@@ -114,9 +114,9 @@ async fn describe_nullability() {
         .describe("SELECT a.id, a.name, a.note, b.a_id, 1 + 1 AS two, a.id + ? AS p FROM a LEFT JOIN b ON b.a_id = a.id WHERE a.name = ?")
         .await
         .unwrap();
-    let names: Vec<&str> = d.columns.iter().map(|c| c.name()).collect();
+    let names: Vec<&str> = d.columns.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(names, ["id", "name", "note", "a_id", "two", "p"]);
-    let not_null: Vec<bool> = d.columns.iter().map(|c| c.type_info().is_not_null()).collect();
+    let not_null: Vec<bool> = d.columns.iter().map(|c| c.type_info.is_not_null()).collect();
     assert_eq!(d.params.len(), 2);
     assert!(not_null[0]);
     assert!(!not_null[2]);
@@ -137,7 +137,7 @@ async fn vector_columns() {
     let row = raw_sql("SELECT e FROM v").fetch_one(&mut conn).await.unwrap();
     assert_eq!(row.get::<&str, _>(0), "[1,2.5,3]");
     // TiDB sends VECTOR as a text column
-    assert_eq!(row.columns()[0].type_info().name(), "TEXT");
+    assert_eq!(row.columns()[0].type_info.name(), "TEXT");
     let d: f64 =
         query_scalar("SELECT VEC_L2_DISTANCE(e, ?) FROM v").bind("[1,2.5,3]").fetch_one(&mut conn).await.unwrap();
     assert_eq!(d, 0.0);

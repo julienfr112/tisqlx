@@ -172,7 +172,7 @@ pub fn expand(input: QueryInput, kind: Kind, source: Source) -> syn::Result<Toke
 
     let mut columns = Vec::with_capacity(desc.columns.len());
     for col in &desc.columns {
-        let (name, null, ty_override) = parse_override(col.name());
+        let (name, null, ty_override) = parse_override(&col.name);
         let base = match ty_override.as_deref() {
             Some("_") if kind == Kind::As => None,
             Some("_") => return Err(syn::Error::new(span, "`col: _` is only allowed in `query_as!`")),
@@ -182,13 +182,13 @@ pub fn expand(input: QueryInput, kind: Kind, source: Source) -> syn::Result<Toke
                 Some(quote!(#t))
             }
             None => Some(
-                rust_type_for(col.type_info()).map_err(|e| syn::Error::new(span, format!("column {name:?}: {e}")))?,
+                rust_type_for(&col.type_info).map_err(|e| syn::Error::new(span, format!("column {name:?}: {e}")))?,
             ),
         };
         let nullable = match null {
             Nullability::NonNull => false,
             Nullability::Nullable => true,
-            Nullability::Inferred => !col.type_info().is_not_null(),
+            Nullability::Inferred => !col.type_info.is_not_null(),
         };
         let ty = base.map(|b| if nullable { quote!(::std::option::Option<#b>) } else { b });
         columns.push(ColumnSpec { name, ty, checked: ty_override.is_none() });
