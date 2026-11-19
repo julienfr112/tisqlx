@@ -1,0 +1,46 @@
+{
+  "query": "INSERT INTO users (name, email, profile) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    {
+      "type": "VarString",
+      "flags": 4097,
+      "charset": 46,
+      "max_size": 256
+    },
+    {
+      "type": "VarString",
+      "flags": 0,
+      "charset": 46,
+      "max_size": 1020
+    },
+    {
+      "type": "Json",
+      "flags": 128,
+      "charset": 63,
+      "max_size": 4294967295
+    }
+  ]
+}

@@ -28,8 +28,14 @@ time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 trybuild = "1"
+# For examples/axum.rs.
+axum = "0.8"
+
+[[example]]
+name = "axum"
+required-features = ["macros", "chrono", "decimal"]
 
 [[test]]
 name = "macros"
