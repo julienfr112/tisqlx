@@ -1,5 +1,5 @@
 //! End-to-end tests of the `tisqlx` binary. The live ones use the dedicated test
-//! TiDB (`TISQLX_TEST_URL`) and skip without it.
+//! TiDB (`TISQLX_TEST_URL`) and are `#[ignore]`d.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -106,6 +106,7 @@ fn commands_needing_a_database_say_so() {
 }
 
 #[test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
 fn migration_lifecycle_against_tidb() {
     let Some(base) = std::env::var("TISQLX_TEST_URL").ok().filter(|u| !u.is_empty()) else {
         assert!(

@@ -6,9 +6,9 @@ it is tested.
 
 ## Housekeeping
 
-- [ ] **P2: Confirm CI is green on GitHub.** The repository has a remote now, but no run of
-  `.github/workflows/ci.yml` has been checked. [TESTING.md § CI](TESTING.md#ci) lists what
-  only a real run can show. Trigger the `cluster` job once by hand.
+- [ ] **P2: Confirm the `audit` and `cluster` CI jobs are green.** The other jobs are; these
+  two failed and were changed ([TESTING.md § CI](TESTING.md#ci)). Trigger the `cluster` job by
+  hand ("Run workflow"): it otherwise runs only nightly.
 - [ ] **P2: No licence files.** The manifests say `MIT OR Apache-2.0`; add `LICENSE-MIT` and
   `LICENSE-APACHE` before publishing.
 
@@ -87,7 +87,7 @@ it is tested.
 
 ## Done
 
-Completed work that isn't obvious from the README, and the test that covers it. "mock" is
+Completed work that isn't obvious from the docs, and the test that covers it. "mock" is
 `tisqlx-core/tests/mock/`, "live" is `tisqlx-core/tests/live/`. Items marked **(no test)**
 were fixed by inspection only.
 
@@ -117,7 +117,8 @@ were fixed by inspection only.
 - **A retried transaction rolls back before the next attempt:** mock
   `retried_transaction_rolls_back_before_the_next_attempt`.
 - **Pool background work is bounded** by the connect timeout (reset on drop, ping on acquire,
-  close): mock `hung_reset_is_abandoned_and_frees_its_slot`.
+  close): mock `hung_reset_is_abandoned_and_frees_its_slot` covers the reset; the ping and
+  the close have **(no test)**.
 - **`idle_timeout` and `min_connections` are enforced,** and idle connections are reused most
   recent first: live `maintenance_reaps_idle_connections_and_keeps_the_minimum`,
   `idle_connections_are_reused_most_recent_first`. `idle_timeout` only retires connections
@@ -206,7 +207,7 @@ were fixed by inspection only.
 - Tests: unit `tz::tests`; live `timezone::*` (round trips in Europe/Paris, and DST parity with
   `UNIX_TIMESTAMP` in Paris and New York).
 
-**Features** (described in the README)
+**Features** (described in [docs/](docs/README.md))
 - **`BulkInsert`:** unit tests for statement building and the time-zone offsets of appended
   rows; live `bulk::*` for batching by rows and by bytes, instants and NULLs in a Paris session,
   the three conflict modes, a failed second batch, and all or nothing inside a transaction.

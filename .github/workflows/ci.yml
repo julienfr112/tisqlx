@@ -21,7 +21,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: make lint features
+      - run: make lint features doc
 
   msrv:
     runs-on: ubuntu-latest
@@ -67,13 +67,28 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
           echo "$HOME/.tiup/bin" >> "$GITHUB_PATH"
+      # Apart from the start: the binaries are large, and `make db-cluster` only waits for the
+      # cluster to come up.
+      - name: Download the cluster binaries
+        run: scripts/tidb.sh cluster-install
       - run: make db-cluster
       - run: make test-cluster
+      - name: Cluster logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cluster-logs
+          path: |
+            target/tidb-cluster-*/playground.log
+            ~/.tiup/data/**/*.log
+          if-no-files-found: ignore
 
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+      # Fails on a vulnerability; an informational advisory (unmaintained, unsound) only warns.
+      - run: make audit

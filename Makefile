@@ -5,9 +5,10 @@
 #   make test           unit + live tests (starts nothing; run db-up first); same as test-live
 #   make test-unit      the tests that need no database
 #   make lint           rustfmt --check and clippy -D warnings (make fmt reformats)
+#   make doc            rustdoc with warnings as errors (broken intra-doc links)
 #   make features       check every supported feature set of the facade
 #   make prepare        regenerate the offline query data (.tisqlx/); prepare-check verifies it
-#   make ci             lint, features, test-live, prepare-check
+#   make ci             lint, features, doc, test-live, prepare-check
 #   make msrv           check on Rust 1.88
 #   make audit          RustSec advisories (needs cargo-audit)
 #   make coverage       HTML coverage report over the live tier (needs cargo-llvm-cov)
@@ -34,7 +35,7 @@ LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET="$(TEST_SOCKET)" TISQ
 # checks the type mapping they fall back to without them.
 TEST_MACROS_FALLBACK := cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
 
-.PHONY: help bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
+.PHONY: help doc bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
 
 help:
 	@sed -n 's/^#   \(make .*\)/\1/p' Makefile
@@ -63,9 +64,14 @@ lint:
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-# No database needed: live tests skip, macros compile from .tisqlx/.
+doc:
+	RUSTDOCFLAGS="-D warnings" cargo doc -q --workspace --all-features --no-deps
+
+# No database needed: live tests skip, macros compile from .tisqlx/. The second run is what a
+# user gets with the default features.
 test-unit:
 	cargo test --workspace --all-features
+	cargo test -q --workspace
 	$(TEST_MACROS_FALLBACK)
 
 # Unit + live tests (the `#[ignore]`d ones need the database); fails if it is unreachable.
@@ -117,4 +123,4 @@ coverage: macros-db
 	$(LIVE_ENV) cargo llvm-cov --workspace --all-features --html -- --include-ignored --skip cluster::
 	@echo "report: target/llvm-cov/html/index.html"
 
-ci: lint features test-live prepare-check
+ci: lint features doc test-live prepare-check

@@ -64,8 +64,7 @@ async fn conflicts_ignore_replace_update() {
     require_db!();
     let (_, mut conn) = table("bulkconflict").await;
     conn.execute_raw("INSERT INTO t VALUES (1, 'old', 5)").await.unwrap();
-    let ins = |b: BulkInsert| b;
-    let mut w = ins(BulkInsert::new("t", &["id", "name"]).ignore()).start(&mut conn).await.unwrap();
+    let mut w = BulkInsert::new("t", &["id", "name"]).ignore().start(&mut conn).await.unwrap();
     w.push((1i64, "ignored")).await.unwrap();
     w.push((2i64, "two")).await.unwrap();
     w.finish().await.unwrap();

@@ -2,7 +2,7 @@
 //! of TiDB's dialect to drive the client through exact packet sequences:
 //! cancellation, multi-results, re-prepares, malformed packets.
 
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -42,12 +42,8 @@ pub const LONGLONG: u8 = 0x08;
 pub const VAR_STRING: u8 = 0xFD;
 pub const UNSIGNED: u16 = 32;
 
-/// Every command packet the server received, in order.
-pub type Log = Arc<Mutex<Vec<Vec<u8>>>>;
-
 pub struct Mock {
     pub url: String,
-    pub log: Log,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -60,26 +56,26 @@ impl Mock {
     {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("tidb://root@{}/db?ssl-mode=disabled", listener.local_addr().unwrap());
-        let log = Log::default();
-        let conn_log = log.clone();
         let task = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
-            script(Conn { socket, seq: 0, log: conn_log }).await;
+            script(Conn { socket, seq: 0 }).await;
         });
-        Self { url, log, task }
+        Self { url, task }
     }
 
-    /// Wait for the script to finish (propagating its panics).
-    pub async fn finish(self) -> Vec<Vec<u8>> {
-        self.task.await.expect("mock server script panicked");
-        Arc::try_unwrap(self.log).unwrap().into_inner().unwrap()
+    /// Wait for the script to finish (propagating its panics). A script still waiting for a
+    /// command the client never sends fails the test instead of hanging it.
+    pub async fn finish(self) {
+        tokio::time::timeout(Duration::from_secs(10), self.task)
+            .await
+            .expect("the mock script is still waiting for a command")
+            .expect("mock server script panicked");
     }
 }
 
 pub struct Conn {
     socket: TcpStream,
     seq: u8,
-    log: Log,
 }
 
 pub fn lenenc_int(buf: &mut Vec<u8>, v: u64) {
@@ -127,11 +123,9 @@ impl Conn {
         Some(payload)
     }
 
-    /// Read the next command (logged), panicking on EOF.
+    /// Read the next command, panicking on EOF.
     pub async fn command(&mut self) -> Vec<u8> {
-        let p = self.recv().await.expect("client closed the connection");
-        self.log.lock().unwrap().push(p.clone());
-        p
+        self.recv().await.expect("client closed the connection")
     }
 
     /// Read the next command and check it is `cmd` (and, for COM_QUERY, its SQL).

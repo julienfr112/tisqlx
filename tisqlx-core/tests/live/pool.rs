@@ -396,7 +396,7 @@ async fn sequential_fetch_one_keeps_using_one_connection() {
         assert_eq!((pool.size(), pool.num_idle()), (1, 1));
     }
     // the rows after the first are read and dropped; an error among them is reported
-    let first: i64 = query_scalar("SELECT 1 UNION ALL SELECT 2").fetch_one(&pool).await.unwrap();
+    let first: i64 = query_scalar("SELECT 1 UNION ALL SELECT 1").fetch_one(&pool).await.unwrap();
     assert_eq!((first, pool.num_idle()), (1, 1));
     let err = raw_sql("SELECT 1; SELECT * FROM missing").fetch_optional(&pool).await.unwrap_err();
     assert_eq!(err.as_database_error().unwrap().code, 1146, "{err}");

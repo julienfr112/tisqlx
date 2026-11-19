@@ -27,7 +27,7 @@ async fn tidb_features() {
     assert!(age < Duration::from_secs(60), "TSO physical time should be recent: {age:?}");
     tx.commit().await.unwrap();
 
-    // Stale reads: table did not exist an hour ago, but `SELECT 1` works.
+    // A stale read sees the row inserted more than its staleness ago, and is read-only.
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let mut tx =
         conn.begin_with(&TxnOptions::stale_read(StaleRead::ExactStaleness(Duration::from_millis(500)))).await.unwrap();
@@ -40,9 +40,14 @@ async fn tidb_features() {
     query("INSERT INTO ar (v) VALUES (3)").execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
 
+    let staleness = "SELECT @@tidb_read_staleness";
     conn.set_read_staleness(Some(Duration::from_secs(1))).await.unwrap();
+    assert_eq!(query_scalar::<String>(staleness).fetch_one(&mut conn).await.unwrap(), "-1");
     conn.set_read_staleness(None).await.unwrap();
+    assert_eq!(query_scalar::<String>(staleness).fetch_one(&mut conn).await.unwrap(), "0");
     conn.set_isolation_read_engines(&[Engine::TiKV, Engine::TiDB]).await.unwrap();
+    let engines: String = query_scalar("SELECT @@tidb_isolation_read_engines").fetch_one(&mut conn).await.unwrap();
+    assert_eq!(engines, "tikv,tidb");
     assert!(conn.tidb_version_info().await.unwrap().contains("Release Version"));
 
     // Write conflict surfaces as retryable.

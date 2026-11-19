@@ -71,7 +71,7 @@ pub fn expand_derive_from_row(input: &DeriveInput) -> syn::Result<TokenStream> {
                 return Err(syn::Error::new_spanned(
                     field,
                     "unsupported combination of #[tisqlx(...)] attributes: use at most one of skip, flatten, \
-                     try_from, json, and `default` only alone or with json",
+                     try_from, json, and `default` with none of skip, flatten, try_from",
                 ));
             }
             let expr = if attrs.skip {

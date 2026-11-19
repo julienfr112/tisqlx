@@ -89,7 +89,7 @@ impl<'a, T: ?Sized> Probe<'a, T> {
     }
 }
 
-/// The class of a value, carried to [`accept`].
+/// The class of a value, carried to `accept`.
 #[derive(Debug)]
 pub struct Class<C>(PhantomData<C>);
 

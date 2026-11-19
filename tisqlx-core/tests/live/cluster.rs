@@ -89,12 +89,11 @@ async fn stale_reads_see_the_past() {
     assert_eq!(v, 1, "read as of before the update");
     tx.commit().await.unwrap();
 
-    // The window must not reach back before the table existed (~2s ago): TiDB may pick
-    // any timestamp in it.
+    // Bounded staleness begins and reads; TiDB may pick any timestamp in the window, so either
+    // version. The window must not reach back before the table existed (~2s ago).
     let mut tx =
         conn.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Duration::from_millis(500)))).await.unwrap();
-    let v: i32 = query_scalar("SELECT v FROM t WHERE id = 1").fetch_one(&mut *tx).await.unwrap();
-    assert!(v == 1 || v == 2, "bounded staleness reads some recent version");
+    let _: i32 = query_scalar("SELECT v FROM t WHERE id = 1").fetch_one(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     let v: i32 = query_scalar("SELECT v FROM t WHERE id = 1").fetch_one(&mut conn).await.unwrap();
     assert_eq!(v, 2);

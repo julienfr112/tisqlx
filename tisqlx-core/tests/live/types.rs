@@ -118,29 +118,8 @@ async fn describe_nullability() {
     assert_eq!(names, ["id", "name", "note", "a_id", "two", "p"]);
     let not_null: Vec<bool> = d.columns.iter().map(|c| c.type_info.is_not_null()).collect();
     assert_eq!(d.params.len(), 2);
-    assert!(not_null[0]);
-    assert!(!not_null[2]);
-}
-
-#[tokio::test]
-#[ignore = "needs a TiDB: run with `make test-live`"]
-async fn vector_columns() {
-    require_db!();
-    let opts = fresh_db("vector").await;
-    let mut conn = opts.connect().await.unwrap();
-    conn.execute_raw("CREATE TABLE v (id INT PRIMARY KEY, e VECTOR(3)); INSERT INTO v VALUES (1, '[1,2.5,3]')")
-        .await
-        .unwrap();
-    // binary and text protocol
-    let e: String = query_scalar("SELECT e FROM v WHERE id = ?").bind(1).fetch_one(&mut conn).await.unwrap();
-    assert_eq!(e, "[1,2.5,3]");
-    let row = raw_sql("SELECT e FROM v").fetch_one(&mut conn).await.unwrap();
-    assert_eq!(row.get::<&str, _>(0), "[1,2.5,3]");
-    // TiDB sends VECTOR as a text column
-    assert_eq!(row.columns()[0].type_info.name(), "TEXT");
-    let d: f64 =
-        query_scalar("SELECT VEC_L2_DISTANCE(e, ?) FROM v").bind("[1,2.5,3]").fetch_one(&mut conn).await.unwrap();
-    assert_eq!(d, 0.0);
+    // NOT NULL is kept for `id`, `name` and the literal, and dropped on the outer side of the join.
+    assert_eq!(not_null, [true, true, false, false, true, false]);
 }
 
 #[tokio::test]
@@ -291,6 +270,9 @@ async fn vector_type() {
     assert_eq!(got, a);
     let row = raw_sql("SELECT e FROM v").fetch_one(&mut conn).await.unwrap();
     assert_eq!(row.get::<Vector, _>(0), a);
+    // TiDB sends VECTOR as a text column, so it reads as a string too
+    assert_eq!(row.columns()[0].type_info.name(), "TEXT");
+    assert_eq!(row.get::<&str, _>(0), "[1,2.5,-3]");
     // as a function argument
     let d: f64 = query_scalar("SELECT VEC_L2_DISTANCE(e, ?) FROM v").bind(&a).fetch_one(&mut conn).await.unwrap();
     assert_eq!(d, 0.0);

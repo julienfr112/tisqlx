@@ -3,7 +3,7 @@
 # on its own port, with TLS and a Unix socket. Never point tests at a shared server.
 #
 #   scripts/tidb.sh up | down | status | url
-#   scripts/tidb.sh cluster-up | cluster-down | cluster-urls | cluster-url
+#   scripts/tidb.sh cluster-install | cluster-up | cluster-down | cluster-urls | cluster-url
 #
 # Uses the tidb-server binary from tiup (`tiup install tidb:$TIDB_VERSION`), or
 # docker (`TIDB_RUNNER=docker`) with the pingcap/tidb image of the same version.
@@ -133,6 +133,12 @@ cluster_up() {
   return 1
 }
 
+# Download the playground and its components. `cluster-up` would fetch them too, but inside
+# its readiness wait: on a machine without them (CI) that wait then runs out.
+cluster_install() {
+  tiup install playground "tidb:$TIDB_VERSION" "pd:$TIDB_VERSION" "tikv:$TIDB_VERSION" "tiflash:$TIDB_VERSION"
+}
+
 cluster_down() {
   if [ -f "$CLUSTER_STATE/playground.pid" ]; then
     local pid
@@ -150,9 +156,10 @@ case "${1:-}" in
   down) down ;;
   status) curl -sf "http://127.0.0.1:$TIDB_STATUS_PORT/status" && echo ;;
   url) url ;;
+  cluster-install) cluster_install ;;
   cluster-up) cluster_up ;;
   cluster-down) cluster_down ;;
   cluster-urls) cluster_urls ;;
   cluster-url) cluster_url ;;
-  *) echo "usage: $0 up|down|status|url|cluster-up|cluster-down|cluster-urls|cluster-url" >&2; exit 2 ;;
+  *) echo "usage: $0 up|down|status|url|cluster-install|cluster-up|cluster-down|cluster-urls|cluster-url" >&2; exit 2 ;;
 esac

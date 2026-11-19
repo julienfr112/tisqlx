@@ -167,14 +167,8 @@ async fn tls_config_is_built_per_options() {
     // the cached rustls config is reused across connections from the same options
     for _ in 0..2 {
         let mut c = tls.connect().await.unwrap();
-        let cipher: String = query_scalar(
-            "SELECT VARIABLE_VALUE FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_cipher'",
-        )
-        .fetch_optional(&mut c)
-        .await
-        .unwrap()
-        .unwrap_or_else(|| "tls".into());
-        assert!(!cipher.is_empty());
+        let row = raw_sql("SHOW STATUS LIKE 'Ssl_cipher'").fetch_one(&mut c).await.unwrap();
+        assert!(!row.get::<String, _>(1).is_empty(), "the session is not encrypted");
     }
     // a clone changed to verify-identity must not reuse the permissive config:
     // the test server's self-signed certificate is rejected
