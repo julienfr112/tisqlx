@@ -1,7 +1,7 @@
 # tisqlx
 
 An async, pure-Rust SQL toolkit built **specifically for [TiDB]**, inspired by
-[sqlx] but written from scratch. Runs on **tokio** with **rustls**, and supports
+[sqlx] but a clean-room rewrite, written with [Claude]. Runs on **tokio** with **rustls**, and supports
 nothing else.
 
 **Requires TiDB 8.5 or newer** (the 8.5 LTS). Older servers are refused at connect time;
@@ -437,5 +437,16 @@ committed `.tisqlx/` data. See [TESTING.md](TESTING.md) for the test strategy an
 `tisqlx_macros` and `_tisqlx_test_*`, and two unprivileged accounts, `tisqlx_sha` and
 `tisqlx_nat`, on the test server.
 
+## How it was written
+
+tisqlx is a clean-room rewrite: it follows the ideas and the API style of [sqlx], but contains
+no code copied from it. It was written with [Claude], Anthropic's AI assistant.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option, the same terms as sqlx.
+
 [TiDB]: https://www.pingcap.com/tidb/
 [sqlx]: https://github.com/launchbadge/sqlx
+[Claude]: https://www.anthropic.com/claude
