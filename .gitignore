@@ -5,3 +5,6 @@
 /.gitmodules
 # Written by a local tidb-server started in the repo root
 /tidb-slow.log
+
+# Local secrets (crates.io token)
+/.env
