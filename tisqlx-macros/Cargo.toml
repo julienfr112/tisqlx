@@ -9,13 +9,6 @@ rust-version.workspace = true
 [lib]
 proc-macro = true
 
-[features]
-default = []
-chrono = ["tisqlx-core/chrono"]
-decimal = ["tisqlx-core/decimal"]
-bigdecimal = ["tisqlx-core/bigdecimal"]
-time = ["tisqlx-core/time"]
-
 [dependencies]
 tisqlx-core.workspace = true
 tokio.workspace = true
@@ -30,7 +23,7 @@ dotenvy.workspace = true
 bigdecimal.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
-time.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

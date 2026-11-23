@@ -1,0 +1,93 @@
+{
+  "query": "SELECT id, ext, ext AS `ext_id: Uuid`, digest AS `digest: Vec<u8>`, short FROM uuids WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "schema": "tisqlx_macros",
+        "table": "uuids",
+        "org_table": "uuids",
+        "name": "id",
+        "org_name": "id",
+        "type_info": {
+          "type": "String",
+          "flags": 4227,
+          "charset": 63,
+          "max_size": 16
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "uuids",
+        "org_table": "uuids",
+        "name": "ext",
+        "org_name": "ext",
+        "type_info": {
+          "type": "String",
+          "flags": 0,
+          "charset": 46,
+          "max_size": 144
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "uuids",
+        "org_table": "uuids",
+        "name": "ext_id: Uuid",
+        "org_name": "ext",
+        "type_info": {
+          "type": "String",
+          "flags": 0,
+          "charset": 46,
+          "max_size": 144
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "uuids",
+        "org_table": "uuids",
+        "name": "digest: Vec<u8>",
+        "org_name": "digest",
+        "type_info": {
+          "type": "String",
+          "flags": 4225,
+          "charset": 63,
+          "max_size": 16
+        },
+        "decimals": 0
+      },
+      {
+        "schema": "tisqlx_macros",
+        "table": "uuids",
+        "org_table": "uuids",
+        "name": "short",
+        "org_name": "short",
+        "type_info": {
+          "type": "VarString",
+          "flags": 4225,
+          "charset": 63,
+          "max_size": 16
+        },
+        "decimals": 0
+      }
+    ],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    {
+      "type": "String",
+      "flags": 4227,
+      "charset": 63,
+      "max_size": 16
+    }
+  ]
+}

@@ -21,7 +21,7 @@ pub mod options;
 pub mod pool;
 mod protocol;
 pub mod query;
-#[cfg(all(test, any(feature = "chrono", feature = "time")))]
+#[cfg(test)]
 mod robustness;
 pub mod row;
 pub mod testing;

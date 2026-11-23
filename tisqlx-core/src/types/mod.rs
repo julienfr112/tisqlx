@@ -7,18 +7,19 @@
 //! | `BIT(n)` | `u64`, `Vec<u8>` |
 //! | `YEAR` | `u16` |
 //! | `FLOAT`, `DOUBLE` | `f32`, `f64` |
-//! | `DECIMAL` | `rust_decimal::Decimal` (`decimal`, ≤ 28 digits), `bigdecimal::BigDecimal` (`bigdecimal`, any precision), `i128`/`u128` (integral values), `f32`/`f64` (rounded) |
+//! | `DECIMAL` | `rust_decimal::Decimal` (≤ 28 digits), `bigdecimal::BigDecimal` (any precision), `i128`/`u128` (integral values), `f32`/`f64` (rounded) |
 //! | `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` |
 //! | `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>`, `Cow<[u8]>` (bind only) |
 //! | `ENUM` | `String`, or a `#[derive(Type)]` enum |
 //! | `SET` | [`Set`], `String` |
 //! | `JSON` | `serde_json::Value`, [`Json<T>`], `&serde_json::value::RawValue` |
 //! | `VECTOR` | [`Vector`] |
-//! | `DATE` | `chrono::NaiveDate`, `time::Date` (also a `DATETIME`/`TIMESTAMP` value at midnight; another time of day is an error) |
-//! | `DATETIME`, `TIMESTAMP` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` (the wall time in the session zone) |
-//! | `TIMESTAMP`, `DATETIME` as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>`, `time::OffsetDateTime` (converted from and to the session zone) |
-//! | `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0), `chrono::NaiveTime`, `time::Time` (< 24h) |
-//! | `BINARY(16)`, `CHAR(36)` | `uuid::Uuid` (bytes or text), `uuid::fmt::Hyphenated` (text) (`uuid`) |
+//! | `DATE` | `chrono::NaiveDate` (also a `DATETIME`/`TIMESTAMP` value at midnight; another time of day is an error) |
+//! | `DATETIME`, `TIMESTAMP` | `chrono::NaiveDateTime` (the wall time in the session zone) |
+//! | `TIMESTAMP`, `DATETIME` as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>` (converted from and to the session zone) |
+//! | `TIME` | `chrono::TimeDelta`, `std::time::Duration` (≥ 0), `chrono::NaiveTime` (< 24h) |
+//! | `BINARY(16)` | `uuid::Uuid` (inferred by the query macros) |
+//! | `CHAR(36)` | `uuid::Uuid` (read only: it binds as bytes), `uuid::fmt::Hyphenated` |
 //! | `BIGINT UNSIGNED` | [`Tso`](crate::tidb::Tso) (TiDB timestamp oracle value) |
 //!
 //! Every type also decodes as `Option<T>` for nullable columns.
@@ -51,12 +52,9 @@ macro_rules! forward_type {
     )+};
 }
 
-#[cfg(feature = "bigdecimal")]
 mod bigdecimal;
 mod bytes;
-#[cfg(feature = "chrono")]
 mod chrono;
-#[cfg(feature = "decimal")]
 mod decimal;
 mod float;
 mod int;
@@ -64,9 +62,6 @@ mod json;
 mod set;
 mod str;
 pub(crate) mod temporal;
-#[cfg(feature = "time")]
-mod time;
-#[cfg(feature = "uuid")]
 mod uuid;
 mod vector;
 

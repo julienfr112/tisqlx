@@ -4,7 +4,7 @@
 
 | tier | needs | what it covers | run with |
 |---|---|---|---|
-| **Unit** | nothing | Pure logic, each module's `#[cfg(test)]`: the wire codec, URL options, auth scrambles, savepoint SQL, the migration planner (`validate`/`pending`/`to_revert`), the macro type mapping checked against the runtime `Type::compatible` (with chrono/`Decimal`, and again with only `time`/`BigDecimal`), the bind-site analyzer, hostile input for every decoder, and CLI version naming. | `make test-unit` |
+| **Unit** | nothing | Pure logic, each module's `#[cfg(test)]`: the wire codec, URL options, auth scrambles, savepoint SQL, the migration planner (`validate`/`pending`/`to_revert`), the macro type mapping checked against the runtime `Type::compatible`, the bind-site analyzer, hostile input for every decoder, and CLI version naming. | `make test-unit` |
 | **Mock protocol** | nothing | `tisqlx-core/tests/mock/`: a scripted MySQL-protocol server sends exact packet sequences. It tests what a real server can't reproduce on demand: futures dropped mid-response, multiple result sets, malformed packets, the 8113 re-prepare, deferred `STMT_CLOSE`, stale prepared metadata, hostile handshakes (clear-text auth, unknown plugins, non-TiDB servers), failover between servers, and pool cleanup after a dropped mid-result stream. | `make test-unit` |
 | **Derive compile tests** | nothing | `tisqlx/tests/derives.rs` checks that the derives generate impls for generic, borrowed and nested types; `tests/ui/*.rs` checks the compile errors of the derives and of `#[tisqlx::test]` (trybuild). | `make test-unit` |
 | **Live** | dedicated TiDB | `tisqlx-core/tests/live/`: every feature against a real server, one throwaway database per test. Covers auth over TLS, the Unix socket and plain TCP, all types in both protocols, transactions and abandoned savepoints, pool accounting and lock release, write-conflict retry, stale reads, migrations, 17 MB packets and an exact 16 MB frame. | `make test-live` |
@@ -15,8 +15,7 @@
 | **Offline data** | dedicated TiDB | `tisqlx prepare --check`: the committed `.tisqlx/` still matches the schema. | `make prepare-check` |
 
 Every test that needs a database is `#[ignore]`d with the target that runs it, so a plain
-`cargo test` works anywhere and reports them as *ignored*, never as passed. The live target of
-`tisqlx-core` needs every optional type, so it is built only with `--all-features`.
+`cargo test` works anywhere and reports them as *ignored*, never as passed.
 - `make test-live` runs them with `--include-ignored` (skipping `cluster::`).
 - `make test-cluster` runs the cluster tests. They read `TISQLX_TEST_CLUSTER` (the URLs of the
   two TiDB nodes), not `TISQLX_TEST_URL`.
@@ -64,12 +63,11 @@ After changing a `query!` call or the test schema (`tisqlx/tests/migrations`), r
 
 | | |
 |---|---|
-| `make lint` | `rustfmt --check`, and clippy on all targets and features with `-D warnings` (workspace lints in `Cargo.toml`) |
-| `make features` | the facade builds with every supported feature set |
+| `make lint` | `rustfmt --check`, and clippy on all targets with `-D warnings` (workspace lints in `Cargo.toml`) |
 | `make msrv` | builds on Rust 1.88 |
 | `make audit` | RustSec advisories (`cargo-audit`) |
 | `make coverage` | `cargo llvm-cov` HTML report over the live tier |
-| `make ci` | lint + features + test-live + prepare-check: the CI jobs `lint` and `live` |
+| `make ci` | lint + test-live + prepare-check: the CI jobs `lint` and `live` |
 | `make bench` | throughput against the test DB: point selects, inserts, transactions and bulk inserts, 10 connections at full speed for 10 s each (`tisqlx-core/examples/bench.rs`). `BENCH_ARGS="--connections 50 --workload select"` changes it. It measures the driver against the standalone `unistore` server, not a real TiKV cluster. |
 | `make bench-cluster` | the same benchmark on a production-shaped tiup playground: 1 TiDB, 3 TiKV (every write replicated 3 times), PD, no TiFlash, on port offset 20000. It starts the cluster, runs the benchmark, and stops it. It takes about a minute and a few GB of RAM. |
 
@@ -79,15 +77,15 @@ After changing a `query!` call or the test schema (`tisqlx/tests/migrations`), r
 
 | Job | When | What |
 |---|---|---|
-| `lint` | always | `make lint features` |
-| `msrv` | always | `cargo check --workspace --all-targets --all-features` on Rust 1.88, as `make msrv` does |
+| `lint` | always | `make lint` |
+| `msrv` | always | `cargo check --workspace --all-targets` on Rust 1.88, as `make msrv` does |
 | `unit` | always | `make test-unit` (no database) |
 | `live` | always | TiDB v8.5.8 (the minimum supported version) in docker, then `make test-live TEST_SOCKET=` (no socket, so socket auth reports itself untested) and `make prepare-check` |
 | `cluster` | nightly and on demand | installs tiup, then `make db-cluster test-cluster` |
 | `audit` | always | `rustsec/audit-check` |
 
 **Status.** Whether the workflow has run green on GitHub has not been checked from this
-checkout ([TODO.md](TODO.md) tracks it). Locally, `make lint features`, `make test-unit`, the
+checkout ([TODO.md](TODO.md) tracks it). Locally, `make lint`, `make test-unit`, the
 MSRV build, the live tier (with the tiup binary) and the cluster tier pass. What only a real
 run can show:
 

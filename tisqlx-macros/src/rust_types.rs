@@ -23,36 +23,21 @@ pub fn rust_type_for(ty: &TypeInfo) -> Result<TokenStream, String> {
         Float => quote!(f32),
         Double => quote!(f64),
         // rust_decimal holds ~28 digits: wider columns (display width = precision + sign
-        // [+ point]) get BigDecimal when it is available.
-        Decimal | NewDecimal if cfg!(feature = "bigdecimal") && (!cfg!(feature = "decimal") || ty.max_size > 29) => {
-            quote!(::tisqlx::types::BigDecimal)
-        }
-        Decimal | NewDecimal if cfg!(feature = "decimal") => quote!(::tisqlx::types::Decimal),
-        Decimal | NewDecimal => {
-            return Err(
-                "DECIMAL columns need the `decimal` or `bigdecimal` feature of tisqlx (or an override like `col: f64`)"
-                    .into(),
-            );
-        }
+        // [+ point]) get BigDecimal.
+        Decimal | NewDecimal if ty.max_size > 29 => quote!(::tisqlx::types::BigDecimal),
+        Decimal | NewDecimal => quote!(::tisqlx::types::Decimal),
         Json => quote!(::tisqlx::types::JsonValue),
-        // chrono when enabled, else the `time` crate
-        Date if cfg!(feature = "chrono") => quote!(::tisqlx::types::chrono::NaiveDate),
-        Datetime if cfg!(feature = "chrono") => quote!(::tisqlx::types::chrono::NaiveDateTime),
-        Timestamp if cfg!(feature = "chrono") => {
-            quote!(::tisqlx::types::chrono::DateTime<::tisqlx::types::chrono::Utc>)
-        }
-        Time if cfg!(feature = "chrono") => quote!(::tisqlx::types::chrono::TimeDelta),
-        Date if cfg!(feature = "time") => quote!(::tisqlx::types::time::Date),
-        Datetime if cfg!(feature = "time") => quote!(::tisqlx::types::time::PrimitiveDateTime),
-        Timestamp if cfg!(feature = "time") => quote!(::tisqlx::types::time::OffsetDateTime),
-        Time if cfg!(feature = "time") => quote!(::tisqlx::types::time::Duration),
-        Date | Datetime | Timestamp | Time => {
-            return Err(format!("{} columns need the `chrono` or `time` feature of tisqlx", ty.name()));
-        }
+        Date => quote!(::tisqlx::types::chrono::NaiveDate),
+        Datetime => quote!(::tisqlx::types::chrono::NaiveDateTime),
+        Timestamp => quote!(::tisqlx::types::chrono::DateTime<::tisqlx::types::chrono::Utc>),
+        Time => quote!(::tisqlx::types::chrono::TimeDelta),
         Enum => quote!(::std::string::String),
         Set => quote!(::tisqlx::types::Set),
         String if ty.flags.contains(ColumnFlags::SET) => quote!(::tisqlx::types::Set),
         String if ty.flags.contains(ColumnFlags::ENUM) => quote!(::std::string::String),
+        // TiDB has no UUID type: a fixed `BINARY(16)` column is taken to hold one (the form
+        // `UUID_TO_BIN` produces). Other 16-byte values need an override such as `col: Vec<u8>`.
+        String if ty.is_binary() && ty.max_size == 16 => quote!(::tisqlx::types::Uuid),
         VarChar | VarString | String | TinyBlob | MediumBlob | LongBlob | Blob if ty.is_binary() => {
             quote!(::std::vec::Vec<u8>)
         }
@@ -135,26 +120,20 @@ mod tests {
         case!(ti(String, ColumnFlags::SET, TEXT, 6), "::tisqlx::types::Set", tisqlx_core::types::Set);
         case!(ti(VarString, 0, BINARY_CHARSET, 255), "::std::vec::Vec<u8>", Vec<u8>);
         case!(ti(Blob, 0, BINARY_CHARSET, 65535), "::std::vec::Vec<u8>", Vec<u8>);
-        case!(ti(String, 0, BINARY_CHARSET, 16), "::std::vec::Vec<u8>", Vec<u8>);
+        case!(ti(String, 0, BINARY_CHARSET, 16), "::tisqlx::types::Uuid", uuid::Uuid);
+        case!(ti(String, 0, BINARY_CHARSET, 20), "::std::vec::Vec<u8>", Vec<u8>);
+        case!(ti(VarString, 0, BINARY_CHARSET, 16), "::std::vec::Vec<u8>", Vec<u8>);
         case!(ti(Json, 0, BINARY_CHARSET, 0), "::tisqlx::types::JsonValue", serde_json::Value);
         case!(ti(Geometry, 0, BINARY_CHARSET, 0), "::std::vec::Vec<u8>", Vec<u8>);
         assert!(rust_type_for(&ti(Null, 0, BINARY_CHARSET, 0)).is_err());
     }
 
-    #[cfg(all(feature = "decimal", feature = "bigdecimal"))]
     #[test]
-    fn wide_decimal_prefers_bigdecimal() {
+    fn decimal_mapping() {
         case!(ti(ColumnType::NewDecimal, 0, BINARY_CHARSET, 67), "::tisqlx::types::BigDecimal", bigdecimal::BigDecimal);
         case!(ti(ColumnType::NewDecimal, 0, BINARY_CHARSET, 12), "::tisqlx::types::Decimal", rust_decimal::Decimal);
     }
 
-    #[cfg(feature = "decimal")]
-    #[test]
-    fn decimal_mapping() {
-        case!(ti(ColumnType::NewDecimal, 0, BINARY_CHARSET, 10), "::tisqlx::types::Decimal", rust_decimal::Decimal);
-    }
-
-    #[cfg(feature = "chrono")]
     #[test]
     fn chrono_mapping() {
         use ColumnType::*;
@@ -167,21 +146,5 @@ mod tests {
             DateTime<Utc>
         );
         case!(ti(Time, 0, BINARY_CHARSET, 10), "::tisqlx::types::chrono::TimeDelta", TimeDelta);
-    }
-
-    #[cfg(all(feature = "bigdecimal", not(feature = "decimal")))]
-    #[test]
-    fn bigdecimal_mapping() {
-        case!(ti(ColumnType::NewDecimal, 0, BINARY_CHARSET, 65), "::tisqlx::types::BigDecimal", bigdecimal::BigDecimal);
-    }
-
-    #[cfg(all(feature = "time", not(feature = "chrono")))]
-    #[test]
-    fn time_mapping() {
-        use ColumnType::*;
-        case!(ti(Date, 0, BINARY_CHARSET, 10), "::tisqlx::types::time::Date", time::Date);
-        case!(ti(Datetime, 0, BINARY_CHARSET, 19), "::tisqlx::types::time::PrimitiveDateTime", time::PrimitiveDateTime);
-        case!(ti(Timestamp, 0, BINARY_CHARSET, 19), "::tisqlx::types::time::OffsetDateTime", time::OffsetDateTime);
-        case!(ti(Time, 0, BINARY_CHARSET, 10), "::tisqlx::types::time::Duration", time::Duration);
     }
 }

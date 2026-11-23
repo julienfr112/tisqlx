@@ -1,9 +1,6 @@
 //! Wire format of DATE/DATETIME/TIMESTAMP and TIME values, independent of any
-//! date-time crate. `chrono` and `time` impls convert to and from these parts;
+//! date-time crate. The `chrono` impls convert to and from these parts;
 //! `std::time::Duration` is implemented here directly.
-
-// Date helpers are only used by the `chrono` and `time` impls.
-#![cfg_attr(not(any(feature = "chrono", feature = "time")), allow(dead_code))]
 
 use std::time::Duration;
 
@@ -23,7 +20,7 @@ pub(crate) fn is_date_or_datetime(ty: &TypeInfo) -> bool {
     ty.r#type == ColumnType::Date || is_datetime(ty)
 }
 
-/// The parameter type of instant types (`DateTime<Utc>`, `OffsetDateTime`, ...): sent as a
+/// The parameter type of instant types (`DateTime<Utc>`, `DateTime<Local>`, ...): sent as a
 /// DATETIME, tagged so the connection converts it from UTC to the session zone at execute time.
 pub(crate) const fn instant_param() -> TypeInfo {
     let mut ty = TypeInfo::new(ColumnType::Datetime);

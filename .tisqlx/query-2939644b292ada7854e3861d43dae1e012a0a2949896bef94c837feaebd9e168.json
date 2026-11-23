@@ -1,5 +1,5 @@
 {
-  "query": "SELECT tags, flag, big, small, ubin AS `ubin: Uuid` FROM typed WHERE id = 1",
+  "query": "SELECT tags, flag, big, small, ubin FROM typed WHERE id = 1",
   "describe": {
     "columns": [
       {
@@ -62,7 +62,7 @@
         "schema": "tisqlx_macros",
         "table": "typed",
         "org_table": "typed",
-        "name": "ubin: Uuid",
+        "name": "ubin",
         "org_name": "ubin",
         "type_info": {
           "type": "String",

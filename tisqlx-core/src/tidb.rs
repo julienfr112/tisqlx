@@ -71,7 +71,6 @@ pub enum StaleRead {
     /// (`TIDB_BOUNDED_STALENESS`).
     MaxStaleness(Duration),
     /// Read at a specific instant (in the session time zone).
-    #[cfg(feature = "chrono")]
     At(chrono::NaiveDateTime),
     /// Read at a TiDB TSO.
     Tso(Tso),
@@ -85,7 +84,6 @@ impl StaleRead {
             Self::MaxStaleness(d) => {
                 format!("TIDB_BOUNDED_STALENESS(NOW(6) - INTERVAL {} MICROSECOND, NOW(6))", d.as_micros())
             }
-            #[cfg(feature = "chrono")]
             Self::At(t) => quote_str(&t.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
             Self::Tso(tso) => format!("TIDB_PARSE_TSO({})", tso.0),
         }

@@ -17,4 +17,7 @@ fn main() {
     let _ = tisqlx::query!("SELECT id FROM users WHERE name LIKE ?", 5i64);
     // text for LIMIT
     let _ = tisqlx::query!("SELECT id FROM users LIMIT ?", "10");
+    // a Uuid is sent as its 16 bytes: a text column takes `id.hyphenated()`
+    let id = tisqlx::types::Uuid::nil();
+    let _ = tisqlx::query!("SELECT id FROM users WHERE name = ?", id);
 }

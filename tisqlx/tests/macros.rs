@@ -88,7 +88,6 @@ async fn generated_code_is_hygienic() {
     assert!(w.iter().all(|w| w.id >= __arg0));
 }
 
-#[cfg(all(feature = "bigdecimal", feature = "uuid"))]
 #[tokio::test]
 #[ignore = "needs a TiDB: run with `make test-live`"]
 async fn macro_type_mapping() {
@@ -107,8 +106,9 @@ async fn macro_type_mapping() {
     .execute(&mut *tx)
     .await
     .unwrap();
-    // inferred: SET => Set, BIT(1) => bool, DECIMAL(65,30) => BigDecimal, DECIMAL(10,2) => Decimal
-    let r = tisqlx::query!("SELECT tags, flag, big, small, ubin AS `ubin: Uuid` FROM typed WHERE id = 1")
+    // inferred: SET => Set, BIT(1) => bool, DECIMAL(65,30) => BigDecimal, DECIMAL(10,2) => Decimal,
+    // BINARY(16) => Uuid
+    let r = tisqlx::query!("SELECT tags, flag, big, small, ubin FROM typed WHERE id = 1")
         .fetch_one(&mut *tx)
         .await
         .unwrap();
@@ -120,7 +120,56 @@ async fn macro_type_mapping() {
     assert_eq!(big.to_string().split('.').next().unwrap(), "123456789012345678901234567890123");
     let small: Decimal = r.small;
     assert_eq!(small, Decimal::new(1250, 2));
-    assert_eq!(r.ubin, Some(id));
+    let ubin: Option<Uuid> = r.ubin;
+    assert_eq!(ubin, Some(id));
+    tx.rollback().await.unwrap();
+}
+
+/// A fixed `BINARY(16)` column is a `Uuid` to the macros; `CHAR(36)` and other binary columns
+/// are not. The rejected bind (a `Uuid` for a text column) is in `tests/ui-query/bind_types.rs`.
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn uuid_columns() {
+    use tisqlx::types::Uuid;
+    let Some(pool) = pool().await else { return };
+    let mut tx = pool.begin().await.unwrap();
+    let id = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
+    let ext = Uuid::from_u128(7);
+    let digest = [0xAB_u8; 16];
+    tisqlx::query!(
+        "INSERT INTO uuids (id, ext, digest, short) VALUES (?, ?, ?, ?)",
+        id,
+        ext.hyphenated(),
+        digest,
+        &b"abc"[..]
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    let r = tisqlx::query!(
+        "SELECT id, ext, ext AS `ext_id: Uuid`, digest AS `digest: Vec<u8>`, short FROM uuids WHERE id = ?",
+        id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    let got: Uuid = r.id; // BINARY(16) NOT NULL
+    assert_eq!(got, id);
+    let text: Option<String> = r.ext; // CHAR(36) stays text
+    assert_eq!(text.as_deref(), Some("00000000-0000-0000-0000-000000000007"));
+    assert_eq!(r.ext_id, Some(ext));
+    assert_eq!(r.digest, digest); // the override for 16 bytes that are not a UUID
+    let short: Vec<u8> = r.short; // VARBINARY(16)
+    assert_eq!(short, b"abc");
+
+    // the bytes are the UUID's own, in order: what `UUID_TO_BIN(x)` and `BIN_TO_UUID(x)` use
+    let s =
+        tisqlx::query_scalar!("SELECT BIN_TO_UUID(id) AS `s!` FROM uuids WHERE id = UUID_TO_BIN(?)", id.to_string())
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(s, id.to_string());
     tx.rollback().await.unwrap();
 }
 

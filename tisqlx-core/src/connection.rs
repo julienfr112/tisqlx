@@ -399,25 +399,21 @@ impl TiConnection {
             sql.push_str(&format!("; SET RESOURCE GROUP {}", quote_ident(group)));
         }
         self.execute_raw(&sql).await?;
-        #[cfg(any(feature = "chrono", feature = "time"))]
         if !options.timezone.as_deref().is_some_and(|tz| SessionZone::resolve(tz, None).is_utc()) {
             self.reload_time_zone().await?;
         }
         Ok(())
     }
 
-    /// Re-read the session `time_zone`, which instant types (`DateTime<Utc>`, `OffsetDateTime`,
-    /// ...) are converted to and from.
+    /// Re-read the session `time_zone`, which instant types (`DateTime<Utc>`,
+    /// `DateTime<Local>`, ...) are converted to and from.
     ///
     /// It is read when the connection opens (and after a pool's `after_connect` hook). TiDB does
     /// not report later changes, so call this after changing it with a raw `SET time_zone`.
     pub async fn reload_time_zone(&mut self) -> Result<()> {
-        #[cfg(any(feature = "chrono", feature = "time"))]
-        {
-            let row = crate::query::raw_sql("SELECT @@time_zone, @@system_time_zone").fetch_one(&mut *self).await?;
-            let (tz, system): (String, Option<String>) = (row.try_get(0)?, row.try_get(1)?);
-            self.zone = SessionZone::resolve(&tz, system.as_deref());
-        }
+        let row = crate::query::raw_sql("SELECT @@time_zone, @@system_time_zone").fetch_one(&mut *self).await?;
+        let (tz, system): (String, Option<String>) = (row.try_get(0)?, row.try_get(1)?);
+        self.zone = SessionZone::resolve(&tz, system.as_deref());
         Ok(())
     }
 

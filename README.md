@@ -61,7 +61,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 
 | crate | role |
 |---|---|
-| `tisqlx` | facade: re-exports and macros. Features: `macros`, `chrono`, `decimal` (the defaults), `time`, `bigdecimal`, `uuid` |
+| `tisqlx` | facade: re-exports and macros. No cargo features: `chrono`, `rust_decimal`, `bigdecimal` and `uuid` are always there, re-exported under `tisqlx::types` |
 | `tisqlx-core` | driver: wire protocol, auth, TLS, types, pool, transactions, TiDB features, migrations |
 | `tisqlx-macros` | `query!` family, `migrate!`, `#[derive(FromRow, Type)]`, `#[tisqlx::test]` (proc-macro crate, used through `tisqlx`) |
 | `tisqlx-cli` | `tisqlx` binary: `database`, `migrate`, `prepare` |
@@ -241,9 +241,9 @@ Arguments accepted for each column type. `&T`, `Option<T>`, `Box<T>`, `Arc<T>` a
 | `CHAR`, `VARCHAR`, `TEXT`, `ENUM`, `SET`, `VECTOR` | `&str`, `String`, `Cow<str>`, `types::Set`, `types::Vector`, `uuid::fmt::Hyphenated`, derived enums, and JSON values (`serde_json::Value`, `Json<T>`, `&RawValue`) |
 | `BINARY`, `VARBINARY`, `BLOB` | `&[u8]`, `Vec<u8>`, `[u8; N]`, `Cow<[u8]>`, `uuid::Uuid`, and everything accepted for text |
 | `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue`, and text (it must be valid JSON) |
-| `DATE` | `chrono::NaiveDate`, `time::Date`, and the datetime types |
-| `DATETIME`, `TIMESTAMP` | `NaiveDateTime`, `DateTime<Utc \| FixedOffset \| Local>`, `time::PrimitiveDateTime`, `time::OffsetDateTime`, and the date types |
-| `TIME` | `chrono::TimeDelta`, `NaiveTime`, `time::Time`, `time::Duration`, `std::time::Duration` |
+| `DATE` | `chrono::NaiveDate`, and the datetime types |
+| `DATETIME`, `TIMESTAMP` | `NaiveDateTime`, `DateTime<Utc \| FixedOffset \| Local>`, and the date types |
+| `TIME` | `chrono::TimeDelta`, `NaiveTime`, `std::time::Duration` |
 | `GEOMETRY`, or a position the macros don't analyse | anything that implements `Encode` |
 
 **When the value has another type.** For example, an id that arrives as a `String`:
@@ -309,29 +309,36 @@ struct UserId(i64);                       // encodes and decodes as its field
 
 ## Type mapping
 
-| TiDB | Rust | feature |
-|---|---|---|
-| `BOOLEAN`/`TINYINT(1)`, `BIT(1)` | `bool` | |
-| `TINYINT`..`BIGINT` (`UNSIGNED`) | `i8`..`i64` (`u8`..`u64`) | |
-| `BIT(n)`, `YEAR` | `u64` (or `Vec<u8>`), `u16` | |
-| `FLOAT`, `DOUBLE` | `f32`, `f64` | |
-| `DECIMAL` | `Decimal` (up to ~28 significant digits; a wider value is an error, not rounded), `BigDecimal` (any precision, up to TiDB's 65), `i128`/`u128` (integral values), `f32`/`f64` (rounded) | `decimal`, `bigdecimal` |
-| `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` | |
-| `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>` | |
-| `ENUM` | `String`, or a `#[derive(Type)]` enum | |
-| `SET` | `types::Set` (list of members), `String` | |
-| `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue` | |
-| `VECTOR` | `types::Vector` (`Vec<f32>`) | |
-| `DATE` | `chrono::NaiveDate`, `time::Date` | `chrono`, `time` |
-| `DATETIME` | `chrono::NaiveDateTime`, `time::PrimitiveDateTime` | `chrono`, `time` |
-| `TIMESTAMP` (or `DATETIME`) as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>`, `time::OffsetDateTime` | `chrono`, `time` |
-| `TIME` | `chrono::TimeDelta`, `time::Duration`, `std::time::Duration` (≥ 0); `NaiveTime`/`time::Time` within a day | `chrono`, `time` |
-| `BINARY(16)`, `CHAR(36)` | `uuid::Uuid` (bytes or text), `uuid::fmt::Hyphenated` (text) | `uuid` |
+| TiDB | Rust (the first is what the query macros infer) |
+|---|---|
+| `BOOLEAN`/`TINYINT(1)`, `BIT(1)` | `bool` |
+| `TINYINT`..`BIGINT` (`UNSIGNED`) | `i8`..`i64` (`u8`..`u64`) |
+| `BIT(n)`, `YEAR` | `u64` (or `Vec<u8>`), `u16` |
+| `FLOAT`, `DOUBLE` | `f32`, `f64` |
+| `DECIMAL` | `Decimal` (up to ~28 significant digits; a wider value is an error, not rounded), `BigDecimal` (any precision, up to TiDB's 65), `i128`/`u128` (integral values), `f32`/`f64` (rounded) |
+| `CHAR`, `VARCHAR`, `TEXT` | `String`, `&str`, `Cow<str>`, `Box<str>`, `Arc<str>` |
+| `BINARY`, `VARBINARY`, `BLOB` | `Vec<u8>`, `&[u8]`, `[u8; N]`, `Box<[u8]>`, `Arc<[u8]>` |
+| `ENUM` | `String`, or a `#[derive(Type)]` enum |
+| `SET` | `types::Set` (list of members), `String` |
+| `JSON` | `serde_json::Value`, `Json<T>`, `&RawValue` |
+| `VECTOR` | `types::Vector` (`Vec<f32>`) |
+| `DATE` | `chrono::NaiveDate` |
+| `DATETIME` | `chrono::NaiveDateTime` |
+| `TIMESTAMP` (or `DATETIME`) as an instant | `chrono::DateTime<Utc>`, `DateTime<FixedOffset>`, `DateTime<Local>` |
+| `TIME` | `chrono::TimeDelta`, `std::time::Duration` (≥ 0); `NaiveTime` within a day |
+| `BINARY(16)` | `uuid::Uuid` (the 16 bytes, as `UUID_TO_BIN(x)` stores them) |
+| `CHAR(36)` | `String`; `uuid::fmt::Hyphenated` to bind, `Uuid` or `Hyphenated` to read |
 
-The query macros infer chrono types when `chrono` is on, else `time`. They infer `Decimal`, or
-`BigDecimal` when `bigdecimal` is on and the column is wider than 28 digits (or `decimal` is
-off). `SET` columns become `types::Set`. UUID and VECTOR columns look like binary and text
-columns to the macros, so they need an override such as `` AS `id: Uuid` ``.
+There are no cargo features: one mapping, always. The query macros infer `Decimal`, or
+`BigDecimal` when the column is wider than 28 digits.
+
+**UUIDs.** TiDB has no UUID type, so the macros take every fixed `BINARY(16)` column for one
+and infer `Uuid`. A `BINARY(16)` that holds something else (an MD5, an IPv6 address) needs an
+override: `` AS `digest: Vec<u8>` ``. `VARBINARY(16)` stays `Vec<u8>`. A `CHAR(36)` column is
+text to the macros: read it with `` AS `id: Uuid` ``, and bind `id.hyphenated()`, because a
+`Uuid` is always sent as its 16 bytes. Store the plain byte order (`UUID_TO_BIN(x)`): with
+the swap flag (`UUID_TO_BIN(x, 1)`) the bytes are reordered and decode to another UUID.
+`VECTOR` columns look like text to the macros and need `` AS `v: Vector` ``.
 
 **Decoding is exact.** A value the Rust type can't hold is an error, never rounded or cut: a
 `DECIMAL` too wide for `Decimal`, a fractional `DECIMAL` read as an integer, a `DOUBLE` out
@@ -341,12 +348,12 @@ or `DATE(col)`). The one exception is asking for a float: `f32`/`f64` round a `D
 `sql_mode`) is an error for every date and datetime type, `Option<_>` included.
 
 **Time zones.** TiDB sends and receives DATETIME and TIMESTAMP values as wall times in the
-session `time_zone`. Naive types (`NaiveDateTime`, `PrimitiveDateTime`) are those wall times
-as they are. Instant types (`DateTime<…>`, `OffsetDateTime`) are converted from and to the
+session `time_zone`. The naive type (`NaiveDateTime`) is that wall time
+as it is. Instant types (`DateTime<…>`) are converted from and to the
 session zone on the client, using the system time zone database:
 - **Default (`timezone=+00:00`):** a UTC session, so no conversion and no loss.
 - **`timezone=Europe/Paris`, `timezone=server`, …:** values are converted, and decoded values
-  carry the session offset (`FixedOffset`, `OffsetDateTime`). Around daylight-saving changes
+  carry the session offset (`DateTime<FixedOffset>`). Around daylight-saving changes
   a wall time is ambiguous or doesn't exist. TiDB itself then stores a TIMESTAMP one hour off,
   and tisqlx decodes exactly as TiDB interprets it. Keep the UTC default to store instants
   losslessly.
@@ -421,7 +428,7 @@ tisqlx prepare --check                # fail if the offline query data is stale
 ```sh
 make db-up     # dedicated test TiDB v8.5.8 on port 4100 (never a shared server); needs tiup or docker
 make test      # unit + mock-protocol + live tests
-make ci        # lint, feature sets, tests, offline-data check
+make ci        # lint, tests, offline-data check
 ```
 
 `cargo test` alone works without a database: live tests skip, and the macros compile from the

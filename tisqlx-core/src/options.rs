@@ -197,7 +197,7 @@ impl ConnectOptions {
     }
 
     /// Session `time_zone` (default `+00:00`; `None` keeps the server default). Instant types
-    /// (`DateTime<Utc>`, `OffsetDateTime`, ...) are converted to and from it on the client.
+    /// (`DateTime<Utc>`, `DateTime<Local>`, ...) are converted to and from it on the client.
     pub fn timezone(mut self, tz: Option<&str>) -> Self {
         self.timezone = tz.map(str::to_owned);
         self
