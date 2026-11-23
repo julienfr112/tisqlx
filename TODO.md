@@ -9,8 +9,6 @@ it is tested.
 - [ ] **P2: Confirm CI is green on GitHub.** The repository has a remote now, but no run of
   `.github/workflows/ci.yml` has been checked. [TESTING.md § CI](TESTING.md#ci) lists what
   only a real run can show. Trigger the `cluster` job once by hand.
-- [ ] **P2: No licence files.** The manifests say `MIT OR Apache-2.0`; add `LICENSE-MIT` and
-  `LICENSE-APACHE` before publishing.
 
 ## Correctness
 
