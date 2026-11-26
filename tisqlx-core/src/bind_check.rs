@@ -169,30 +169,16 @@ impl<T: BindClass + ?Sized> BindClass for std::sync::Arc<T> {
     type Class = T::Class;
 }
 
-#[cfg(feature = "decimal")]
 classify!(Number: rust_decimal::Decimal);
-#[cfg(feature = "bigdecimal")]
 classify!(Number: bigdecimal::BigDecimal);
-#[cfg(feature = "uuid")]
 classify!(Bytes: uuid::Uuid);
-#[cfg(feature = "uuid")]
 classify!(Text: uuid::fmt::Hyphenated);
-#[cfg(feature = "chrono")]
 classify!(Date: chrono::NaiveDate);
-#[cfg(feature = "chrono")]
 classify!(DateTime: chrono::NaiveDateTime);
-#[cfg(feature = "chrono")]
 classify!(Time: chrono::NaiveTime, chrono::TimeDelta);
-#[cfg(feature = "chrono")]
 impl<Tz: chrono::TimeZone> BindClass for chrono::DateTime<Tz> {
     type Class = class::DateTime;
 }
-#[cfg(feature = "time")]
-classify!(Date: time::Date);
-#[cfg(feature = "time")]
-classify!(DateTime: time::PrimitiveDateTime, time::OffsetDateTime);
-#[cfg(feature = "time")]
-classify!(Time: time::Time, time::Duration);
 
 #[cfg(test)]
 mod tests {

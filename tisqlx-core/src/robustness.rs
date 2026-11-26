@@ -2,7 +2,7 @@
 //! arbitrary bytes. A deterministic stand-in for `cargo fuzz` (which needs nightly): random
 //! inputs plus truncations and bit flips of valid packets.
 //!
-//! `TISQLX_FUZZ_ITERS=1000000 cargo test -p tisqlx-core --all-features robustness` runs longer.
+//! `TISQLX_FUZZ_ITERS=1000000 cargo test -p tisqlx-core robustness` runs longer.
 
 use crate::protocol::row::{decode_binary_row, decode_text_row};
 use crate::protocol::{ColumnDefinition, Handshake, OkPacket, PrepareOk, decode_eof_status, decode_err};
@@ -185,13 +185,9 @@ fn decode_all(v: ValueRef<'_>) {
         crate::types::Vector,
         std::time::Duration,
     );
-    #[cfg(feature = "decimal")]
     each!(rust_decimal::Decimal);
-    #[cfg(feature = "bigdecimal")]
     each!(bigdecimal::BigDecimal);
-    #[cfg(feature = "uuid")]
     each!(uuid::Uuid, uuid::fmt::Hyphenated);
-    #[cfg(feature = "chrono")]
     each!(
         chrono::NaiveDate,
         chrono::NaiveDateTime,
@@ -201,6 +197,4 @@ fn decode_all(v: ValueRef<'_>) {
         chrono::DateTime<chrono::FixedOffset>,
         chrono::DateTime<chrono::Local>,
     );
-    #[cfg(feature = "time")]
-    each!(time::Date, time::PrimitiveDateTime, time::OffsetDateTime, time::Time, time::Duration);
 }

@@ -102,3 +102,18 @@ note: required by a bound in `tisqlx::bind_check::accept`
    |
    | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
    |                       ^^^^^^^^^^^ required by this bound in `accept`
+
+error[E0277]: this argument's type is not compatible with the column it is compared with or assigned to
+  --> tests/ui-query/bind_types.rs:22:67
+   |
+22 |     let _ = tisqlx::query!("SELECT id FROM users WHERE name = ?", id);
+   |                                                                   ^^ a `tisqlx::bind_check::class::Bytes` value, but the parameter expects a `tisqlx::bind_check::col::Text` value
+   |
+   = help: the trait `tisqlx::bind_check::Accept<tisqlx::bind_check::col::Text>` is not implemented for `tisqlx::bind_check::class::Bytes`
+   = note: the query macros infer the parameter's type from the column next to its `?`
+   = note: if the conversion is intended, bind `value as _` to skip this check
+note: required by a bound in `tisqlx::bind_check::accept`
+  --> $WORKSPACE/tisqlx-core/src/bind_check.rs
+   |
+   | pub fn accept<Col, C: Accept<Col>>(_: Class<C>) {}
+   |                       ^^^^^^^^^^^ required by this bound in `accept`

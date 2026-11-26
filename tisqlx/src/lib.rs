@@ -22,7 +22,6 @@
 
 pub use tisqlx_core::*;
 
-#[cfg(feature = "macros")]
 pub use tisqlx_macros::{
     FromRow, Type, migrate, query, query_as, query_file, query_file_as, query_file_scalar, query_scalar, test,
 };
@@ -32,15 +31,9 @@ pub mod types {
     pub use serde_json::Value as JsonValue;
     pub use tisqlx_core::types::*;
 
-    #[cfg(feature = "bigdecimal")]
     pub use bigdecimal::{self, BigDecimal};
-    #[cfg(feature = "chrono")]
     pub use chrono;
-    #[cfg(feature = "decimal")]
     pub use rust_decimal::Decimal;
-    #[cfg(feature = "time")]
-    pub use time;
-    #[cfg(feature = "uuid")]
     pub use uuid::{self, Uuid};
 }
 

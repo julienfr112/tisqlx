@@ -6,11 +6,10 @@ it is tested.
 
 ## Housekeeping
 
-- [ ] **P2: Confirm the `audit` and `cluster` CI jobs are green.** The other jobs are; these
-  two failed and were changed ([TESTING.md § CI](TESTING.md#ci)). Trigger the `cluster` job by
-  hand ("Run workflow"): it otherwise runs only nightly.
-- [ ] **P2: No licence files.** The manifests say `MIT OR Apache-2.0`; add `LICENSE-MIT` and
-  `LICENSE-APACHE` before publishing.
+- [ ] **P2: Confirm the `audit`, `cluster` and `rawkv` CI jobs are green.** The other jobs
+  are; `audit` and `cluster` failed and were changed, `rawkv` is new
+  ([TESTING.md § CI](TESTING.md#ci)). Trigger the `cluster` job by hand ("Run workflow"): it
+  otherwise runs only nightly.
 
 ## Correctness
 
@@ -77,6 +76,14 @@ it is tested.
     an override.
 - [ ] **P3: Protocol features.** Compression, `LOAD DATA LOCAL INFILE`,
   `COM_STMT_SEND_LONG_DATA` and cursor fetch are not supported.
+- [ ] **P2: RawKV over TLS.** `tisqlx-rawkv` refuses `https://` PD URLs, and connects to TiKV
+  in plain text. It needs a rustls connector (ring, like `tisqlx-core`) with a CA and an
+  optional client certificate, plus a TLS playground to test against.
+- [ ] **P3: RawKV gaps.** API V2 (keyspace-prefixed keys), reverse scans (they need the region
+  *before* a key from PD), `RawBatchScan`, `RawChecksum`.
+  Retries after a dropped TiKV connection and after a leader transfer (`NotLeader`) are
+  implemented but not tested; testing them needs a playground with 3 TiKV and a
+  `pd-ctl operator add transfer-leader`.
 
 ## Ideas (TiDB-specific)
 

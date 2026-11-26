@@ -24,7 +24,7 @@ cargo new users && cd users
 ```toml
 # Cargo.toml
 [dependencies]
-tisqlx = { git = "https://github.com/julienfr112/tisqlx" }
+tisqlx = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 

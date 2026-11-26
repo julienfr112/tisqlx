@@ -6,14 +6,15 @@
 #   make test-unit      the tests that need no database
 #   make lint           rustfmt --check and clippy -D warnings (make fmt reformats)
 #   make doc            rustdoc with warnings as errors (broken intra-doc links)
-#   make features       check every supported feature set of the facade
 #   make prepare        regenerate the offline query data (.tisqlx/); prepare-check verifies it
-#   make ci             lint, features, doc, test-live, prepare-check
+#   make ci             lint, doc, test-live, prepare-check
 #   make msrv           check on Rust 1.88
 #   make audit          RustSec advisories (needs cargo-audit)
 #   make coverage       HTML coverage report over the live tier (needs cargo-llvm-cov)
 #   make db-cluster     start the cluster tier (tiup playground: 2 TiDB, PD, TiKV, TiFlash)
 #   make test-cluster   tests that need the real cluster; db-cluster-down stops it
+#   make db-rawkv       start the RawKV tier (tiup playground: PD + TiKV only, TTL enabled)
+#   make test-rawkv     the tisqlx-rawkv tests against it; db-rawkv-down stops it
 #   make bench          throughput against the test DB (10 connections, 10 s per workload)
 #   make bench-cluster  the same on a production-shaped playground (1 TiDB, 3 TiKV), started and stopped
 #
@@ -31,11 +32,7 @@ CLI         := cargo run -q -p tisqlx-cli --
 LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET="$(TEST_SOCKET)" TISQLX_TEST_REQUIRE=1 \
 	DATABASE_URL=$(MACROS_URL) TISQLX_OFFLINE=false
 
-# The workspace run builds the macros with every feature, so chrono and Decimal win. This
-# checks the type mapping they fall back to without them.
-TEST_MACROS_FALLBACK := cargo test -q -p tisqlx-macros --no-default-features --features time,bigdecimal --lib
-
-.PHONY: help doc bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check features msrv audit coverage ci
+.PHONY: help doc bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster db-rawkv db-rawkv-down test-rawkv fmt lint test-unit test test-live macros-db prepare prepare-check msrv audit coverage ci
 
 help:
 	@sed -n 's/^#   \(make .*\)/\1/p' Makefile
@@ -55,29 +52,36 @@ db-cluster-down:
 # Tests that need PD/TiKV/TiFlash and two TiDB nodes (skipped by the other tiers).
 test-cluster:
 	TISQLX_TEST_CLUSTER=$$(scripts/tidb.sh cluster-urls) TISQLX_TEST_REQUIRE_CLUSTER=1 \
-		cargo test -p tisqlx-core --all-features --test live cluster:: -- --include-ignored
+		cargo test -p tisqlx-core --test live cluster:: -- --include-ignored
+
+# RawKV client tests: a TiKV-only playground, since TTLs (API V1TTL) are refused next to TiDB.
+db-rawkv:
+	scripts/tidb.sh rawkv-up
+
+db-rawkv-down:
+	scripts/tidb.sh rawkv-down
+
+test-rawkv:
+	TISQLX_TEST_RAWKV_PD=$$(scripts/tidb.sh rawkv-pd) TISQLX_TEST_REQUIRE_RAWKV=1 \
+		cargo test -p tisqlx-rawkv -- --include-ignored
 
 fmt:
 	cargo fmt --all
 
 lint:
 	cargo fmt --all --check
-	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	cargo clippy --workspace --all-targets -- -D warnings
 
 doc:
-	RUSTDOCFLAGS="-D warnings" cargo doc -q --workspace --all-features --no-deps
+	RUSTDOCFLAGS="-D warnings" cargo doc -q --workspace --no-deps
 
-# No database needed: live tests skip, macros compile from .tisqlx/. The second run is what a
-# user gets with the default features.
+# No database needed: live tests skip, macros compile from .tisqlx/.
 test-unit:
-	cargo test --workspace --all-features
-	cargo test -q --workspace
-	$(TEST_MACROS_FALLBACK)
+	cargo test --workspace
 
 # Unit + live tests (the `#[ignore]`d ones need the database); fails if it is unreachable.
 test-live test: macros-db
-	$(LIVE_ENV) cargo test --workspace --all-features -- --include-ignored --skip cluster::
-	$(TEST_MACROS_FALLBACK)
+	$(LIVE_ENV) cargo test --workspace --exclude tisqlx-rawkv -- --include-ignored --skip cluster::
 
 # Schema the query macros are checked against.
 macros-db:
@@ -85,23 +89,14 @@ macros-db:
 
 # Regenerate the offline query data (.tisqlx/) against the test database.
 prepare: macros-db
-	DATABASE_URL=$(MACROS_URL) $(CLI) prepare -- --all-features
+	DATABASE_URL=$(MACROS_URL) $(CLI) prepare
 
 # Fail if the committed offline data is stale.
 prepare-check: macros-db
-	DATABASE_URL=$(MACROS_URL) $(CLI) prepare --check -- --all-features
-
-# Every supported feature combination of the facade builds.
-features:
-	cargo check -q -p tisqlx
-	cargo check -q -p tisqlx --no-default-features
-	cargo check -q -p tisqlx --no-default-features --features macros
-	cargo check -q -p tisqlx --no-default-features --features chrono,decimal
-	cargo check -q -p tisqlx --no-default-features --features macros,time,bigdecimal,uuid
-	cargo check -q -p tisqlx --all-features
+	DATABASE_URL=$(MACROS_URL) $(CLI) prepare --check
 
 msrv:
-	CARGO_TARGET_DIR=target/msrv cargo +$(MSRV) check -q --workspace --all-targets --all-features
+	CARGO_TARGET_DIR=target/msrv cargo +$(MSRV) check -q --workspace --all-targets
 
 # Throughput (release build). Override e.g. `make bench BENCH_ARGS="--connections 50 --workload select"`.
 BENCH_ARGS ?=
@@ -120,7 +115,7 @@ audit:
 	cargo audit
 
 coverage: macros-db
-	$(LIVE_ENV) cargo llvm-cov --workspace --all-features --html -- --include-ignored --skip cluster::
+	$(LIVE_ENV) cargo llvm-cov --workspace --exclude tisqlx-rawkv --html -- --include-ignored --skip cluster::
 	@echo "report: target/llvm-cov/html/index.html"
 
-ci: lint features doc test-live prepare-check
+ci: lint doc test-live prepare-check

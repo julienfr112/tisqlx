@@ -1,4 +1,4 @@
-//! Instant types (`DateTime<Utc>`, `OffsetDateTime`, ...) in a session whose time zone is not UTC.
+//! Instant types (`DateTime<Utc>`, `DateTime<Local>`, ...) in a session whose time zone is not UTC.
 
 use std::time::Duration;
 
@@ -58,8 +58,6 @@ async fn instants_round_trip_in_a_non_utc_session() {
                 let fixed = r.get::<DateTime<FixedOffset>, _>(col);
                 assert_eq!((fixed, fixed.offset().local_minus_utc()), (at.fixed_offset(), offset), "{col}");
                 assert_eq!(r.get::<DateTime<Local>, _>(col), at, "{col}");
-                let odt = r.get::<time::OffsetDateTime, _>(col);
-                assert_eq!((odt.unix_timestamp(), odt.offset().whole_seconds()), (at.timestamp(), offset), "{col}");
             }
         }
         // A bound instant is compared in the session zone too.
@@ -70,8 +68,9 @@ async fn instants_round_trip_in_a_non_utc_session() {
             .await
             .unwrap();
         assert_eq!(n, 1);
-        let odt = time::OffsetDateTime::from_unix_timestamp_nanos(at.timestamp_nanos_opt().unwrap() as i128).unwrap();
-        let n: i64 = query_scalar("SELECT COUNT(*) FROM t WHERE ts = ?").bind(odt).fetch_one(&mut conn).await.unwrap();
+        let fixed = at.with_timezone(&FixedOffset::east_opt(offset).unwrap());
+        let n: i64 =
+            query_scalar("SELECT COUNT(*) FROM t WHERE ts = ?").bind(fixed).fetch_one(&mut conn).await.unwrap();
         assert_eq!(n, 1);
     }
     let echoed: DateTime<Utc> = query_scalar("SELECT ?").bind(cases[0].1).fetch_one(&mut conn).await.unwrap();

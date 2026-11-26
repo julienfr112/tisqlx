@@ -1,0 +1,58 @@
+{
+  "query": "INSERT INTO uuids (id, ext, digest, short) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "params": [
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      },
+      {
+        "type": "Blob",
+        "flags": 0,
+        "charset": 46,
+        "max_size": 0
+      }
+    ]
+  },
+  "param_types": [
+    {
+      "type": "String",
+      "flags": 4227,
+      "charset": 63,
+      "max_size": 16
+    },
+    {
+      "type": "String",
+      "flags": 0,
+      "charset": 46,
+      "max_size": 144
+    },
+    {
+      "type": "String",
+      "flags": 4225,
+      "charset": 63,
+      "max_size": 16
+    },
+    {
+      "type": "VarString",
+      "flags": 4225,
+      "charset": 63,
+      "max_size": 16
+    }
+  ]
+}

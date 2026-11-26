@@ -1,4 +1,4 @@
-//! The session time zone, for instant types (`DateTime<Utc>`, `OffsetDateTime`, ...).
+//! The session time zone, for instant types (`DateTime<Utc>`, `DateTime<Local>`, ...).
 //!
 //! TiDB sends and receives DATETIME and TIMESTAMP values as wall-clock times in the session
 //! `time_zone`. Instant types are converted between UTC and that zone on the client: when a
@@ -13,9 +13,6 @@
 //!
 //! Use a UTC session (the default) to store instants losslessly.
 
-// Without `chrono`/`time` there are no instant types, and the zone is always UTC.
-#![cfg_attr(not(any(feature = "chrono", feature = "time")), allow(dead_code))]
-
 use std::sync::Arc;
 
 use crate::error::BoxDynError;
@@ -26,7 +23,6 @@ use crate::types::temporal::DateTimeParts;
 pub(crate) enum SessionZone {
     #[default]
     Utc,
-    #[cfg(any(feature = "chrono", feature = "time"))]
     Zone(jiff::tz::TimeZone),
     /// Not usable on the client (e.g. no time zone database); instant types fail with this reason.
     Unresolved(Arc<str>),
@@ -34,7 +30,6 @@ pub(crate) enum SessionZone {
 
 impl SessionZone {
     /// Resolve a `time_zone` value; `SYSTEM` stands for `system` (`@@system_time_zone`).
-    #[cfg(any(feature = "chrono", feature = "time"))]
     pub fn resolve(name: &str, system: Option<&str>) -> Self {
         let name = match name {
             "SYSTEM" => match system {
@@ -72,7 +67,6 @@ impl SessionZone {
     pub fn utc_to_local(&self, utc: DateTimeParts) -> Result<DateTimeParts, BoxDynError> {
         match self {
             Self::Utc => Ok(utc),
-            #[cfg(any(feature = "chrono", feature = "time"))]
             Self::Zone(tz) => {
                 Ok(from_civil(tz.to_datetime(to_civil(utc)?.to_zoned(jiff::tz::TimeZone::UTC)?.timestamp()))?)
             }
@@ -84,7 +78,6 @@ impl SessionZone {
     pub fn local_to_utc(&self, local: DateTimeParts) -> Result<(DateTimeParts, i32), BoxDynError> {
         match self {
             Self::Utc => Ok((local, 0)),
-            #[cfg(any(feature = "chrono", feature = "time"))]
             Self::Zone(tz) => {
                 let ts = tidb_instant(tz, to_civil(local)?)?;
                 let utc = from_civil(jiff::tz::TimeZone::UTC.to_datetime(ts))?;
@@ -96,7 +89,6 @@ impl SessionZone {
 }
 
 /// The instant TiDB maps a session wall time to (see the module docs).
-#[cfg(any(feature = "chrono", feature = "time"))]
 fn tidb_instant(tz: &jiff::tz::TimeZone, wall: jiff::civil::DateTime) -> Result<jiff::Timestamp, BoxDynError> {
     use jiff::tz::{AmbiguousOffset, Offset};
     match tz.to_ambiguous_timestamp(wall).offset() {
@@ -118,7 +110,6 @@ fn tidb_instant(tz: &jiff::tz::TimeZone, wall: jiff::civil::DateTime) -> Result<
 }
 
 /// `+HH:MM` / `-HH:MM` (as accepted by `SET time_zone`), in seconds.
-#[cfg(any(feature = "chrono", feature = "time"))]
 fn parse_offset(s: &str) -> Option<i32> {
     let (sign, rest) = match s.as_bytes().first()? {
         b'+' => (1, &s[1..]),
@@ -135,7 +126,6 @@ fn parse_offset(s: &str) -> Option<i32> {
     (h < 24 && m < 60).then_some(sign * (h * 3600 + m * 60))
 }
 
-#[cfg(any(feature = "chrono", feature = "time"))]
 fn to_civil(p: DateTimeParts) -> Result<jiff::civil::DateTime, BoxDynError> {
     Ok(jiff::civil::DateTime::new(
         p.year as i16,
@@ -148,7 +138,6 @@ fn to_civil(p: DateTimeParts) -> Result<jiff::civil::DateTime, BoxDynError> {
     )?)
 }
 
-#[cfg(any(feature = "chrono", feature = "time"))]
 fn from_civil(dt: jiff::civil::DateTime) -> Result<DateTimeParts, BoxDynError> {
     Ok(DateTimeParts::date(dt.year().into(), dt.month() as u8, dt.day() as u8)?.with_time(
         dt.hour() as u8,
@@ -158,7 +147,7 @@ fn from_civil(dt: jiff::civil::DateTime) -> Result<DateTimeParts, BoxDynError> {
     ))
 }
 
-#[cfg(all(test, any(feature = "chrono", feature = "time")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

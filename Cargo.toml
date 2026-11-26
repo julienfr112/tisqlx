@@ -1,17 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["tisqlx-core", "tisqlx-macros", "tisqlx", "tisqlx-cli"]
+members = ["tisqlx-core", "tisqlx-macros", "tisqlx", "tisqlx-cli", "tisqlx-rawkv"]
 exclude = ["sqlx"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88"
 
 [workspace.dependencies]
-tisqlx-core = { path = "tisqlx-core", version = "0.1.0", default-features = false }
-tisqlx-macros = { path = "tisqlx-macros", version = "0.1.0" }
+tisqlx-core = { path = "tisqlx-core", version = "0.2.0" }
+tisqlx-macros = { path = "tisqlx-macros", version = "0.2.0" }
 tokio = { version = "1", features = ["net", "io-util", "rt", "sync", "time"] }
 futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["alloc", "std"] }
@@ -25,7 +25,6 @@ serde_json = { version = "1", features = ["raw_value"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 rust_decimal = { version = "1", default-features = false, features = ["std"] }
 bigdecimal = { version = "0.4", default-features = false, features = ["std"] }
-time = { version = "0.3", default-features = false, features = ["std"] }
 uuid = { version = "1", default-features = false, features = ["std"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 webpki-roots = "1"
@@ -37,6 +36,9 @@ quote = "1"
 proc-macro2 = "1"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
+# RawKV: gRPC to PD and TiKV. Client side only (no server, so no axum); messages are hand-written.
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost"] }
+prost = { version = "0.13", default-features = false, features = ["std", "derive"] }
 dotenvy = "0.15"
 
 [workspace.lints.rust]

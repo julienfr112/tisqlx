@@ -198,10 +198,10 @@ async fn extended_types() {
 
     let big = BigDecimal::from_str("12345678901234567890123456789012345.123456789012345678901234567890").unwrap();
     let id = uuid::Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
-    let date = time::Date::from_calendar_date(2026, time::Month::November, 18).unwrap();
-    let dt = date.with_hms_micro(9, 5, 7, 123_456).unwrap();
-    let ts = dt.assume_utc();
-    let t = time::Time::from_hms_micro(23, 59, 58, 1).unwrap();
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 11, 18).unwrap();
+    let dt = date.and_hms_micro_opt(9, 5, 7, 123_456).unwrap();
+    let ts = dt.and_utc();
+    let t = chrono::NaiveTime::from_hms_micro_opt(23, 59, 58, 1).unwrap();
     query("INSERT INTO x VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&big)
         .bind(id)
@@ -212,7 +212,7 @@ async fn extended_types() {
         .bind(dt)
         .bind(ts)
         .bind(t)
-        .bind(time::Duration::seconds(-90_061))
+        .bind(chrono::TimeDelta::seconds(-90_061))
         .bind(Arc::<str>::from("shared"))
         .bind(Box::<[u8]>::from(&b"boxed"[..]))
         .execute(&mut conn)
@@ -235,26 +235,68 @@ async fn extended_types() {
         assert_eq!(row.get::<Set, _>("tags"), Set::from_iter(["a", "c"]), "{p}");
         assert!(row.get::<Set, _>("tags").contains("c"));
         assert!(row.get::<bool, _>("flag"), "{p}: BIT(1)");
-        assert_eq!(row.get::<time::Date, _>("d"), date, "{p}");
-        assert_eq!(row.get::<time::PrimitiveDateTime, _>("dt"), dt, "{p}");
-        assert_eq!(row.get::<time::OffsetDateTime, _>("ts"), ts, "{p}");
-        assert_eq!(row.get::<time::Time, _>("t"), t, "{p}");
+        assert_eq!(row.get::<chrono::NaiveDate, _>("d"), date, "{p}");
+        assert_eq!(row.get::<chrono::NaiveDateTime, _>("dt"), dt, "{p}");
+        assert_eq!(row.get::<chrono::DateTime<chrono::Utc>, _>("ts"), ts, "{p}");
+        assert_eq!(row.get::<chrono::NaiveTime, _>("t"), t, "{p}");
         assert_eq!(row.get::<std::time::Duration, _>("t"), std::time::Duration::from_micros(86_398_000_001), "{p}");
-        assert_eq!(row.get::<time::Duration, _>("neg"), time::Duration::seconds(-90_061), "{p}: -25:01:01");
+        assert_eq!(row.get::<chrono::TimeDelta, _>("neg"), chrono::TimeDelta::seconds(-90_061), "{p}: -25:01:01");
         assert!(row.try_get::<std::time::Duration, _>("neg").is_err(), "{p}: negative TIME");
-        assert!(row.try_get::<time::Time, _>("neg").is_err(), "{p}: TIME outside a day");
+        assert!(row.try_get::<chrono::NaiveTime, _>("neg").is_err(), "{p}: TIME outside a day");
         assert_eq!(&*row.get::<Arc<str>, _>("txt"), "shared", "{p}");
         assert_eq!(&*row.get::<Box<str>, _>("txt"), "shared", "{p}");
         assert_eq!(&*row.get::<Box<[u8]>, _>("blb"), b"boxed", "{p}");
         assert_eq!(&*row.get::<Arc<[u8]>, _>("blb"), b"boxed", "{p}");
-        // chrono reads the same values
-        assert_eq!(row.get::<chrono::NaiveDateTime, _>("dt").to_string(), "2026-11-18 09:05:07.123456");
     }
 
     // an empty SET, and a member that cannot be encoded
     let empty: Set = query_scalar("SELECT CAST('' AS CHAR)").fetch_one(&mut conn).await.unwrap();
     assert_eq!(empty, Set::default());
     assert!(query("SELECT ?").bind(Set::from_iter(["a,b"])).execute(&mut conn).await.is_err());
+}
+
+/// What the driver does not check about UUIDs is left to TiDB and to decoding.
+#[tokio::test]
+#[ignore = "needs a TiDB: run with `make test-live`"]
+async fn uuid_misuse() {
+    use uuid::Uuid;
+    require_db!();
+    let opts = fresh_db("uuidmisuse").await;
+    let mut conn = opts.connect().await.unwrap();
+    conn.execute_raw("CREATE TABLE t (k INT PRIMARY KEY, bin VARBINARY(20), txt CHAR(36), swapped BINARY(16))")
+        .await
+        .unwrap();
+    let id = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
+
+    // A `Uuid` is sent as its 16 bytes, which a text column refuses (strict `sql_mode`): bind
+    // `id.hyphenated()` there.
+    let e = query("INSERT INTO t (k, txt) VALUES (1, ?)").bind(id).execute(&mut conn).await.unwrap_err();
+    assert!(e.to_string().contains("1366"), "{e}");
+    // A lookup fails only once there is a row to compare: on an empty table it finds nothing.
+    let none = query("SELECT k FROM t WHERE txt = ?").bind(id).fetch_optional(&mut conn).await.unwrap();
+    assert!(none.is_none());
+
+    query("INSERT INTO t VALUES (1, ?, 'not-a-uuid', UUID_TO_BIN(?, 1))")
+        .bind(&b"too short"[..])
+        .bind(id.to_string())
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let e = query("SELECT k FROM t WHERE txt = ?").bind(id).fetch_optional(&mut conn).await.unwrap_err();
+    assert!(e.to_string().contains("from binary to utf8mb4"), "{e}");
+
+    for prepared in [true, false] {
+        let sql = "SELECT bin, txt, swapped FROM t";
+        let row =
+            if prepared { query(sql).fetch_one(&mut conn).await } else { raw_sql(sql).fetch_one(&mut conn).await }
+                .unwrap();
+        // neither 16 bytes nor a textual UUID
+        assert!(row.try_get::<Uuid, _>("bin").is_err(), "prepared={prepared}");
+        assert!(row.try_get::<Uuid, _>("txt").is_err(), "prepared={prepared}");
+        assert!(row.try_get::<uuid::fmt::Hyphenated, _>("txt").is_err(), "prepared={prepared}");
+        // `UUID_TO_BIN(x, 1)` reorders the bytes: they decode, to another UUID
+        assert_ne!(row.get::<Uuid, _>("swapped"), id, "prepared={prepared}");
+    }
 }
 
 #[tokio::test]
@@ -384,11 +426,6 @@ async fn null_of_every_type_into_every_column() {
         chrono::DateTime<chrono::Utc>,
         chrono::NaiveTime,
         chrono::TimeDelta,
-        time::Date,
-        time::PrimitiveDateTime,
-        time::OffsetDateTime,
-        time::Time,
-        time::Duration,
         std::time::Duration,
     );
 }
@@ -450,21 +487,17 @@ async fn dates_from_datetimes_and_zero_dates_in_both_protocols() {
                 .unwrap();
         let p = format!("prepared={prepared}");
         assert_eq!(row.get::<chrono::NaiveDate, _>("midnight"), day, "{p}");
-        assert_eq!(row.get::<time::Date, _>("midnight").to_string(), "2026-11-18", "{p}");
         assert_eq!(row.get::<chrono::NaiveDate, _>("d"), day, "{p}");
         for column in ["frac", "ts"] {
             let e = row.try_get::<chrono::NaiveDate, _>(column).unwrap_err().to_string();
             let time = if column == "frac" { "00:00:00.500000" } else { "09:05:07.000000" };
             assert!(e.contains("time of day") && e.contains(time), "{p} {column}: {e}");
-            assert!(row.try_get::<time::Date, _>(column).is_err(), "{p} {column}");
             assert!(row.try_get::<Option<chrono::NaiveDate>, _>(column).is_err(), "{p} {column}");
         }
         for column in ["zero_d", "zero_dt"] {
             let e = row.try_get::<Option<chrono::NaiveDate>, _>(column).unwrap_err().to_string();
             assert!(e.contains("zero date '0000-00-00'"), "{p} {column}: {e}");
-            assert!(row.try_get::<Option<time::Date>, _>(column).is_err(), "{p} {column}");
             assert!(row.try_get::<Option<chrono::NaiveDateTime>, _>(column).is_err(), "{p} {column}");
-            assert!(row.try_get::<Option<time::PrimitiveDateTime>, _>(column).is_err(), "{p} {column}");
         }
         assert!(row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("zero_dt").is_err(), "{p}");
     }

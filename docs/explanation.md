@@ -34,9 +34,9 @@ examples, each detailed below or in the [reference](reference.md):
 The price is plain: tisqlx is of no use with MySQL or any other server, and by default refuses
 to connect to one. TiDB 8.5 is the oldest version it is tested against.
 
-It is written from scratch, without `unsafe`, after the model of [sqlx]: the same shape of
-API (`query`, `query_as`, `query!`, `FromRow`, `Pool`, `migrate!`), so sqlx code and habits
-carry over.
+It is a clean-room rewrite, without `unsafe`, after the model of [sqlx]: no code copied from
+it, but the same shape of API (`query`, `query_as`, `query!`, `FromRow`, `Pool`, `migrate!`),
+so sqlx code and habits carry over. It was written with [Claude], Anthropic's AI assistant.
 
 ## Migrations
 
@@ -220,3 +220,4 @@ a date. The alternative, rounding or cutting silently, turns a schema mismatch i
 numbers that look right. The exception is a float, where rounding is what the type means.
 
 [sqlx]: https://github.com/launchbadge/sqlx
+[Claude]: https://www.anthropic.com/claude

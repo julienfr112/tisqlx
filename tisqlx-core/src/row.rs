@@ -41,7 +41,6 @@ pub struct ValueRef<'r> {
     pub(crate) bytes: Option<&'r [u8]>,
     pub(crate) format: RowFormat,
     pub(crate) type_info: &'r TypeInfo,
-    #[cfg_attr(not(any(feature = "chrono", feature = "time")), allow(dead_code))]
     pub(crate) zone: &'r SessionZone,
 }
 

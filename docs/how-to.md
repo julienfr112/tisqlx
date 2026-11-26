@@ -17,6 +17,7 @@ and defaults are in the [reference](reference.md); the reasons are in the
 - [Connect to several TiDB servers](#connect-to-several-tidb-servers)
 - [Connect to TiDB Cloud](#connect-to-tidb-cloud)
 - [Serve an HTTP API with axum](#serve-an-http-api-with-axum)
+- [Use TiKV directly (RawKV)](#use-tikv-directly-rawkv)
 
 ## Use transactions
 
@@ -107,7 +108,7 @@ let mut tx = pool.begin_with(&TxnOptions::stale_read(StaleRead::MaxStaleness(Dur
 |---|---|
 | `ExactStaleness(duration)` | as of exactly that long ago |
 | `MaxStaleness(duration)` | the freshest data no older than that (`TIDB_BOUNDED_STALENESS`) |
-| `At(NaiveDateTime)` | at that instant, in the session time zone (feature `chrono`) |
+| `At(NaiveDateTime)` | at that instant, in the session time zone |
 | `Tso(tso)` | at that TiDB timestamp |
 
 ### Nested transactions
@@ -358,3 +359,52 @@ The parts worth copying:
   rounds it.
 - **Shutdown:** after `axum::serve(...).with_graceful_shutdown(...)` returns, call
   `pool.close().await`.
+
+## Use TiKV directly (RawKV)
+
+`tisqlx-rawkv` talks to TiKV's raw key-value API without TiDB: plain keys and values, no
+transactions. It speaks gRPC to PD and TiKV and needs no `protoc` or C library (its protobuf
+messages are written by hand from kvproto's release-8.5).
+
+```toml
+[dependencies]
+tisqlx-rawkv = "0.2"
+```
+
+```rust
+use tisqlx_rawkv::RawClient;
+
+let kv = RawClient::connect(["127.0.0.1:2379"]).await?;    // PD endpoints
+kv.put("app/user/1", "alice").await?;
+let v = kv.get("app/user/1").await?;                        // Option<Vec<u8>>
+kv.batch_put([("app/a", "1"), ("app/b", "2")]).await?;
+let page = kv.scan("app/", "app0", 100).await?;             // [start, end), at most 10240
+kv.delete_range("app/", "app0").await?;
+
+let atomic = kv.with_atomic_for_cas();                      // see below
+atomic.compare_and_swap("app/counter", Some(b"1".to_vec()), "2").await?;
+```
+
+- **Operations:** `get`, `batch_get`, `put`, `batch_put`, `delete`, `batch_delete`,
+  `delete_range`, `scan`/`scan_keys`, `compare_and_swap`, `put_with_ttl`/`batch_put_with_ttl`
+  and `get_key_ttl_secs`, `split_regions`, and `with_cf` for the `lock` and `write` column
+  families.
+- **Routing:** each request goes to the leader of the region that holds its key. Regions and
+  stores come from PD and are cached. `NotLeader`, `EpochNotMatch` (splits and merges),
+  `RegionNotFound`, `ServerIsBusy` and unreachable stores refresh the cache and retry, for up
+  to `Config::retry_deadline` (20 s). Batches are grouped by region and sent concurrently, at
+  most 2048 keys or 2 MiB per request. Scans and range deletes walk the regions in order.
+- **Not transactional:** a batch over several regions is several writes, and some can land
+  while others fail.
+- **CAS:** TiKV keeps a compare-and-swap atomic only against writes that are also marked "for
+  CAS". Every client that writes those keys must use `with_atomic_for_cas()`, which marks all
+  its puts and deletes. `delete_range` isn't available in that mode.
+- **TTL** needs `storage.enable-ttl = true` (API V1TTL), which kvproto documents as RawKV only:
+  not for a cluster that also runs TiDB. A plain V1 TiKV rejects TTL requests.
+- **Next to TiDB** (API V1, the default): raw keys share the key space with TiDB's data, whose
+  keys start with `t` and `m`. Keep raw keys under a prefix of your own, and never scan or
+  delete an unbounded range there.
+- **Not supported yet:** TLS to PD/TiKV, API V2 keyspaces, reverse scans (see
+  [TODO.md](../TODO.md)).
+
+A local TiKV without TiDB: `tiup playground --mode tikv-slim` (PD on `127.0.0.1:2379`).
