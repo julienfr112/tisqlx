@@ -70,6 +70,20 @@ jobs:
       - run: make db-cluster
       - run: make test-cluster
 
+  # RawKV client against a TiKV-only playground (1 PD, 1 TiKV): light enough for every run.
+  rawkv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install tiup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
+          echo "$HOME/.tiup/bin" >> "$GITHUB_PATH"
+      - run: make db-rawkv
+      - run: make test-rawkv
+
   audit:
     runs-on: ubuntu-latest
     steps:

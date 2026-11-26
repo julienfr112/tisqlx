@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["tisqlx-core", "tisqlx-macros", "tisqlx", "tisqlx-cli"]
+members = ["tisqlx-core", "tisqlx-macros", "tisqlx", "tisqlx-cli", "tisqlx-rawkv"]
 exclude = ["sqlx"]
 
 [workspace.package]
@@ -36,6 +36,9 @@ quote = "1"
 proc-macro2 = "1"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
+# RawKV: gRPC to PD and TiKV. Client side only (no server, so no axum); messages are hand-written.
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "prost"] }
+prost = { version = "0.13", default-features = false, features = ["std", "derive"] }
 dotenvy = "0.15"
 
 [workspace.lints.rust]

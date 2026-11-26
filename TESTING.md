@@ -11,6 +11,7 @@
 | **Macros (live)** | dedicated TiDB | `tisqlx/tests/macros.rs` compiles the `query!` family online and runs the queries. `tests/ui-query/*.rs` (run by `derives.rs`) checks the query macro compile errors: bind count, bind types, bad column names, bad SQL. | `make test-live` |
 | **`#[tisqlx::test]`** | dedicated TiDB | `tisqlx/tests/test_attr.rs` uses the attribute itself: a database per test, migrations, fixtures, `Result` returns. | `make test-live` |
 | **Cluster** | tiup playground | `tisqlx-core/tests/live/cluster.rs` needs a real cluster: TiFlash reads, DDL on one TiDB node while the other holds a cached statement, stale reads returning old data, TiKV lock-wait timeouts, and a pool spread over both nodes. | `make db-cluster test-cluster` |
+| **RawKV** | tiup playground, TiKV only | `tisqlx-rawkv/tests/live.rs`: single and batch operations, scans and range deletes over regions split by the test, a client with stale cached regions (EpochNotMatch), TTL expiry, CAS (a counter under concurrent increments), column families, an unreachable PD. Its unit tests (region cache, batch chunking, backoff) run in `make test-unit`. | `make db-rawkv test-rawkv` |
 | **CLI** | both tiers | `tisqlx-cli/tests/cli.rs` runs the real binary: `migrate add`, `build-script` and the `.env` lookup without a DB, and a full lifecycle against TiDB (setup, dry runs, revert, dirty migration, repair, a `reset` that can't read its migrations). | `make test-unit` / `make test-live` |
 | **Offline data** | dedicated TiDB | `tisqlx prepare --check`: the committed `.tisqlx/` still matches the schema. | `make prepare-check` |
 
@@ -46,6 +47,15 @@ TiKV and TiFlash.
 - It takes about 30 s to start once the binaries are cached, and uses a few GB of RAM.
 - `make db-cluster-down` stops it and removes its data. CI runs this tier nightly.
 - Its tests create the databases `tisqlx_c_*`.
+
+The **RawKV tier** runs `tiup playground --mode tikv-slim`: 1 PD and 1 TiKV, no TiDB, at port
+offset 30000 (PD on 32379). Its TiKV has `storage.enable-ttl = true` so TTLs can be tested,
+and kvproto documents that mode (API V1TTL) as RawKV only, so this tier doesn't share the cluster tier.
+- `make db-rawkv` starts it (state in `target/rawkv-30000`), `make test-rawkv` runs
+  `tisqlx-rawkv`'s tests with `TISQLX_TEST_RAWKV_PD` and `TISQLX_TEST_REQUIRE_RAWKV=1`, and
+  `make db-rawkv-down` stops it.
+- Each test writes under its own `tisqlx-test/<test>/<nanos>/` prefix and deletes it at the end.
+- `make test-live` excludes `tisqlx-rawkv`: its live tests would only skip there.
 
 The macro tests compile from the committed offline data (`tisqlx/.env` sets `TISQLX_OFFLINE=true`).
 The live tier compiles them online instead (`DATABASE_URL` plus `TISQLX_OFFLINE=false`).

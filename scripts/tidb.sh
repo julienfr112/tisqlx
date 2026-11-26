@@ -13,6 +13,12 @@
 # so it can run next to a default playground. It takes ~30 s and a few GB of RAM.
 # CLUSTER_DB, CLUSTER_KV and CLUSTER_TIFLASH change the topology: `make bench-cluster`
 # uses 1 TiDB and 3 TiKV (3 replicas, as in production), no TiFlash, at offset 20000.
+#
+#   scripts/tidb.sh rawkv-up | rawkv-down | rawkv-pd
+#
+# `rawkv-up` starts the RawKV tier: a TiKV-only playground (1 PD, 1 TiKV, no TiDB) at port
+# offset $RAWKV_PORT_OFFSET (30000), with `storage.enable-ttl` so TTLs can be tested. That
+# setting (API V1TTL) is for RawKV-only clusters (kvproto: "only available to RawKV").
 set -euo pipefail
 
 TIDB_VERSION="${TIDB_VERSION:-v8.5.8}"
@@ -145,6 +151,53 @@ cluster_down() {
   fi
 }
 
+RAWKV_PORT_OFFSET="${RAWKV_PORT_OFFSET:-30000}"
+RAWKV_STATE="$ROOT/target/rawkv-$RAWKV_PORT_OFFSET"
+
+rawkv_pd() { echo "127.0.0.1:$((2379 + RAWKV_PORT_OFFSET))"; }
+
+# Ready once PD lists the TiKV store as Up and has a region for it.
+rawkv_ready() {
+  curl -sf "http://$(rawkv_pd)/pd/api/v1/stores" | grep -q '"state_name": *"Up"' || return 1
+  curl -sf "http://$(rawkv_pd)/pd/api/v1/regions/count" | grep -q '"count": *[1-9]'
+}
+
+rawkv_up() {
+  if rawkv_ready; then echo "RawKV cluster already running: PD $(rawkv_pd)"; return 0; fi
+  for p in 2379 2380 20160 20180; do
+    if port_busy $((p + RAWKV_PORT_OFFSET)); then
+      echo "port $((p + RAWKV_PORT_OFFSET)) is in use; set RAWKV_PORT_OFFSET to another value" >&2
+      exit 1
+    fi
+  done
+  mkdir -p "$RAWKV_STATE"
+  cat >"$RAWKV_STATE/tikv.toml" <<TOML
+[storage]
+api-version = 1
+enable-ttl = true
+TOML
+  nohup tiup playground "$TIDB_VERSION" --mode tikv-slim --kv 1 --pd 1 --without-monitor \
+    --kv.config "$RAWKV_STATE/tikv.toml" --port-offset "$RAWKV_PORT_OFFSET" \
+    >"$RAWKV_STATE/playground.log" 2>&1 &
+  echo $! >"$RAWKV_STATE/playground.pid"
+  for _ in $(seq 1 150); do
+    if rawkv_ready; then echo "RawKV cluster ready: PD $(rawkv_pd)"; return 0; fi
+    sleep 2
+  done
+  echo "RawKV cluster did not become ready; see $RAWKV_STATE/playground.log" >&2
+  return 1
+}
+
+rawkv_down() {
+  if [ -f "$RAWKV_STATE/playground.pid" ]; then
+    local pid
+    pid="$(cat "$RAWKV_STATE/playground.pid")"
+    kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 60); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    rm -f "$RAWKV_STATE/playground.pid"
+  fi
+}
+
 case "${1:-}" in
   up) up ;;
   down) down ;;
@@ -154,5 +207,8 @@ case "${1:-}" in
   cluster-down) cluster_down ;;
   cluster-urls) cluster_urls ;;
   cluster-url) cluster_url ;;
-  *) echo "usage: $0 up|down|status|url|cluster-up|cluster-down|cluster-urls|cluster-url" >&2; exit 2 ;;
+  rawkv-up) rawkv_up ;;
+  rawkv-down) rawkv_down ;;
+  rawkv-pd) rawkv_pd ;;
+  *) echo "usage: $0 up|down|status|url|cluster-up|cluster-down|cluster-urls|cluster-url|rawkv-up|rawkv-down|rawkv-pd" >&2; exit 2 ;;
 esac

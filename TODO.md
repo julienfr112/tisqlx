@@ -75,6 +75,14 @@ it is tested.
     an override.
 - [ ] **P3: Protocol features.** Compression, `LOAD DATA LOCAL INFILE`,
   `COM_STMT_SEND_LONG_DATA` and cursor fetch are not supported.
+- [ ] **P2: RawKV over TLS.** `tisqlx-rawkv` refuses `https://` PD URLs, and connects to TiKV
+  in plain text. It needs a rustls connector (ring, like `tisqlx-core`) with a CA and an
+  optional client certificate, plus a TLS playground to test against.
+- [ ] **P3: RawKV gaps.** API V2 (keyspace-prefixed keys), reverse scans (they need the region
+  *before* a key from PD), `RawBatchScan`, `RawChecksum`. The `rawkv` CI job has not run on GitHub yet.
+  Retries after a dropped TiKV connection and after a leader transfer (`NotLeader`) are
+  implemented but not tested; testing them needs a playground with 3 TiKV and a
+  `pd-ctl operator add transfer-leader`.
 
 ## Ideas (TiDB-specific)
 

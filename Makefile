@@ -12,6 +12,8 @@
 #   make coverage       HTML coverage report over the live tier (needs cargo-llvm-cov)
 #   make db-cluster     start the cluster tier (tiup playground: 2 TiDB, PD, TiKV, TiFlash)
 #   make test-cluster   tests that need the real cluster; db-cluster-down stops it
+#   make db-rawkv       start the RawKV tier (tiup playground: PD + TiKV only, TTL enabled)
+#   make test-rawkv     the tisqlx-rawkv tests against it; db-rawkv-down stops it
 #   make bench          throughput against the test DB (10 connections, 10 s per workload)
 #   make bench-cluster  the same on a production-shaped playground (1 TiDB, 3 TiKV), started and stopped
 #
@@ -29,7 +31,7 @@ CLI         := cargo run -q -p tisqlx-cli --
 LIVE_ENV := TISQLX_TEST_URL=$(TEST_URL) TISQLX_TEST_SOCKET="$(TEST_SOCKET)" TISQLX_TEST_REQUIRE=1 \
 	DATABASE_URL=$(MACROS_URL) TISQLX_OFFLINE=false
 
-.PHONY: help bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster fmt lint test-unit test test-live macros-db prepare prepare-check msrv audit coverage ci
+.PHONY: help bench bench-cluster db-up db-down db-cluster db-cluster-down test-cluster db-rawkv db-rawkv-down test-rawkv fmt lint test-unit test test-live macros-db prepare prepare-check msrv audit coverage ci
 
 help:
 	@sed -n 's/^#   \(make .*\)/\1/p' Makefile
@@ -51,6 +53,17 @@ test-cluster:
 	TISQLX_TEST_CLUSTER=$$(scripts/tidb.sh cluster-urls) TISQLX_TEST_REQUIRE_CLUSTER=1 \
 		cargo test -p tisqlx-core --test live cluster:: -- --include-ignored
 
+# RawKV client tests: a TiKV-only playground, since TTLs (API V1TTL) are refused next to TiDB.
+db-rawkv:
+	scripts/tidb.sh rawkv-up
+
+db-rawkv-down:
+	scripts/tidb.sh rawkv-down
+
+test-rawkv:
+	TISQLX_TEST_RAWKV_PD=$$(scripts/tidb.sh rawkv-pd) TISQLX_TEST_REQUIRE_RAWKV=1 \
+		cargo test -p tisqlx-rawkv -- --include-ignored
+
 fmt:
 	cargo fmt --all
 
@@ -64,7 +77,7 @@ test-unit:
 
 # Unit + live tests (the `#[ignore]`d ones need the database); fails if it is unreachable.
 test-live test: macros-db
-	$(LIVE_ENV) cargo test --workspace -- --include-ignored --skip cluster::
+	$(LIVE_ENV) cargo test --workspace --exclude tisqlx-rawkv -- --include-ignored --skip cluster::
 
 # Schema the query macros are checked against.
 macros-db:
@@ -98,7 +111,7 @@ audit:
 	cargo audit
 
 coverage: macros-db
-	$(LIVE_ENV) cargo llvm-cov --workspace --html -- --include-ignored --skip cluster::
+	$(LIVE_ENV) cargo llvm-cov --workspace --exclude tisqlx-rawkv --html -- --include-ignored --skip cluster::
 	@echo "report: target/llvm-cov/html/index.html"
 
 ci: lint test-live prepare-check
