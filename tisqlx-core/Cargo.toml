@@ -4,6 +4,7 @@ description = "Core of tisqlx: a pure-Rust async TiDB driver (protocol, types, p
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]

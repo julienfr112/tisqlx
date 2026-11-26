@@ -4,6 +4,7 @@ description = "A pure-Rust async RawKV client for TiKV: gRPC to PD and TiKV, reg
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
